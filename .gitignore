@@ -15,13 +15,6 @@ __pycache__/
 venv/
 env/
 
-# Environment installers (kept out of git — too large)
-Miniconda3-latest-MacOSX-arm64.sh
-*.sh
-
-# Local scratch
-test.py
-
 # Data and output — collaborate via Dropbox, not git
 data/
 output/
