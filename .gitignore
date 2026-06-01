@@ -21,5 +21,23 @@ output/
 !data/.gitkeep
 !output/.gitkeep
 
+# macOS zip metadata
+__MACOSX/
+
 # Logs
 *.log
+
+# earning_dynamics — code only; data/output via Dropbox
+earning_dynamics/data/
+earning_dynamics/output/
+
+# guvenen_2021_replication — drop heavy/regeneratable artifacts
+guvenen_2021_replication/14603_Data_and_Programs.zip
+guvenen_2021_replication/14603_Data_and_Programs/submission/PSID programs/Intermediate/
+guvenen_2021_replication/14603_Data_and_Programs/submission/PSID programs/Output/
+guvenen_2021_replication/14603_Data_and_Programs/submission/PSID programs/LogFiles/
+guvenen_2021_replication/14603_Data_and_Programs/submission/GKOS_2021_replication.xlsx
+guvenen_2021_replication/targeted_moments_stata/do/
+guvenen_2021_replication/targeted_moments_stata/dta/
+guvenen_2021_replication/targeted_moments_stata/out/
+guvenen_2021_replication/targeted_moments_stata/log/

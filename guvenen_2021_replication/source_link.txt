@@ -1,0 +1,4 @@
+Source of guv 2021 fortran replication
+
+https://www.econometricsociety.org/publications/econometrica/2021/09/01/what-do-data-millions-us-workers-reveal-about-lifecycle
+
