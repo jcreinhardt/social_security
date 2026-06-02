@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1                # one launcher task; it spawns the workers
 #SBATCH --cpus-per-task=96        # match to a node with >= this many cores
 #SBATCH --exclusive
-#SBATCH --time=12:00:00           # the full 21-param solve is heavy; adjust
+#SBATCH --time=06:00:00           # the full 21-param solve is heavy; adjust
 #SBATCH --mem=64G                 # ~96 workers x ~0.45 GB at n_sim=25000 (mem_benchmark.py)
 #SBATCH --output=tiktak_21param_%j.out
 # ---------------------------------------------------------------------------
