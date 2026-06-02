@@ -37,8 +37,13 @@ echo "Node: $(hostname)   logical CPUs: $(nproc)"
 mkdir -p output/scaling
 
 # ---- environment -----------------------------------------------------------
-# Adjust the module line for your cluster if conda isn't already on PATH, e.g.:
-#   module load anaconda3      # or miniconda / mambaforge
+# Make conda available. On Yale's Bouchet cluster that's the miniconda module
+# (`module spider conda` -> miniconda/{23.5.2,24.7.1,24.11.3}). Change this line
+# for a different cluster (e.g. `module load anaconda3`), or drop it if conda is
+# already on PATH.
+if command -v module >/dev/null 2>&1; then
+    module load miniconda/24.11.3
+fi
 if command -v conda >/dev/null 2>&1; then
     set +u   # conda's shell hook references unbound vars under `set -u`
     source "$(conda info --base)/etc/profile.d/conda.sh"
