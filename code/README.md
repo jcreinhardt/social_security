@@ -240,6 +240,26 @@ knobs at the top of the script (`CORES_LIST`, `N_SIM`, `N_SOBOL`, `KEEP_BEST`,
 `MAXITER`); keep `KEEP_BEST` ≥ the largest core count so stage B saturates
 every core. Set `--cpus-per-task` to your node size.
 
+For a **fast pipeline check** that schedules quickly (small request, so it
+backfills) while a big job waits in the queue, submit the companion
+`hpc_scaling_quick.sh` — a tiny workload at small core counts (2/4/8/12) that
+verifies the whole chain (module + conda env + numba + file coordination +
+report) end-to-end in a couple of minutes. It writes `output/scaling_quick/` and
+is *not* a precise benchmark (it does not take the node exclusively), only a
+correctness/sanity run; use the full script for real numbers. Both scripts share
+their body via `_scaling_lib.sh`, so env fixes apply to both.
+
+### Sizing `--mem`
+`mem_benchmark.py` measures one worker's peak RSS and extrapolates to N workers
+(the job runs N independent processes, so total ≈ N × per-worker — and SLURM's
+`MaxRSS` undercounts that, reporting only the largest single process):
+```bash
+python mem_benchmark.py --n-sim 25000 --cores 12 24 36 48 60
+```
+At `n_sim=25000` that's ~425 MB/worker → ~32 GB (with headroom) at 60 cores,
+which is why the full script requests 48 GB; the quick run needs ~4 GB. Re-run
+it if you change `n_sim` (memory scales with it).
+
 ### Key flags
 `--spawn N` local workers · `--worker-id`/`--workers` array mode ·
 `--workdir` shared dir · `--n-sim` individuals · `--n-sobol` Sobol draws ·
