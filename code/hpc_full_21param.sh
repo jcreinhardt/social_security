@@ -3,13 +3,13 @@
 #SBATCH --job-name=tiktak_21param
 #SBATCH --nodes=1
 #SBATCH --ntasks=1                # one launcher task; it spawns the workers
-#SBATCH --cpus-per-task=96        # match to a node with >= this many cores
+#SBATCH --cpus-per-task=64        # match to a node with >= this many cores
 #SBATCH --exclusive
 #SBATCH --time=06:00:00           # the full 21-param solve is heavy; adjust
-#SBATCH --mem=64G                 # ~96 workers x ~0.45 GB at n_sim=25000 (mem_benchmark.py)
+#SBATCH --mem=48G                 # ~64 workers x ~0.45 GB at n_sim=25000 (mem_benchmark.py)
 #SBATCH --output=tiktak_21param_%j.out
 # ---------------------------------------------------------------------------
-# Full 21-parameter Guvenen income-process estimation on one node with 96
+# Full 21-parameter Guvenen income-process estimation on one node with 64
 # cores, against SYNTHETIC targets (moments at the Guvenen values), so the
 # known answer for every parameter is its Guvenen value. After the solve it
 # produces two figures comparing the found minimum to the Guvenen values and
@@ -33,7 +33,7 @@ ROOT="${SLURM_SUBMIT_DIR:-$(pwd)}"
 ENV_NAME="${ENV_NAME:-socsec_mac}"
 
 # ---- knobs -----------------------------------------------------------------
-CORES=96
+CORES=64
 N_SIM=25000
 N_SOBOL=50000                     # Sobol screen (21-dim needs broad coverage)
 KEEP_BEST=480                     # local restarts; >= CORES so stage B uses all
