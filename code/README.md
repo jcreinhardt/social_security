@@ -71,9 +71,18 @@ TikTak is a multi-start global optimizer:
    x_start_k = θ_k · z*  +  (1 − θ_k) · start_k,   θ_k ramps theta_min → theta_max
    ```
    Early searches (θ_k small) explore; later ones (θ_k → 1) refine near the best
-   basin found so far. Each `x_start_k` is polished with a local optimizer
-   (Powell, then Nelder-Mead).
+   basin found so far. `blend_shape` controls the ramp: `"sqrt"` (default,
+   Guvenen-style `θ_k = √frac`, concave — exploits the incumbent best earlier)
+   or `"linear"`. Each `x_start_k` is polished with a local optimizer (Powell,
+   then Nelder-Mead); the per-restart iteration budget scales down with θ_k
+   (`maxiter_min_frac`), since exploit-heavy restarts start essentially at `z*`.
 4. **Final polish** from the global best.
+
+   *Note:* in practice these two knobs move wall time only marginally for this
+   problem — the local optimizer self-terminates well before the iteration cap
+   binds, so shrinking the cap rarely helps, and the Sobol stage plus the
+   high-budget *explore* restarts dominate. They're kept because the sqrt ramp
+   is Guvenen-faithful and reliably steers restarts into good basins at no cost.
 
 TikTak scales roughly **linearly up to √N cores**, where *N* is the number of
 local searches (see `../TikTak-main/README.md`); beyond that, extra cores compete
@@ -234,8 +243,10 @@ every core. Set `--cpus-per-task` to your node size.
 ### Key flags
 `--spawn N` local workers · `--worker-id`/`--workers` array mode ·
 `--workdir` shared dir · `--n-sim` individuals · `--n-sobol` Sobol draws ·
-`--keep-best` local starts · `--maxiter` local-opt iterations · `--seed` CRN seed ·
-`--sobol-seed` shared Sobol scramble seed · `--real-moments PATH` · `--resume`.
+`--keep-best` local starts · `--maxiter` local-opt iterations ·
+`--blend-shape sqrt|linear` · `--maxiter-min-frac` (exploit-restart budget,
+1.0 = no scaling) · `--seed` CRN seed · `--sobol-seed` shared Sobol scramble
+seed · `--real-moments PATH` · `--resume`.
 
 ## 6. Files
 - `msm_model.py` — DGP, moments, SMM objective (the hot path).

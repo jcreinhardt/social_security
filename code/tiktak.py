@@ -223,12 +223,15 @@ def _bound_penalty(x, lo, hi, weight):
     return weight * float(np.sum(below ** 2 + above ** 2))
 
 
-def local_search(objective, x_start, bounds, cfg):
+def local_search(objective, x_start, bounds, cfg, maxiter=None):
     """Run a chain of local optimizers from ``x_start``; return (best_x,
     best_f). Powell is tried with native bounds, others via a smooth penalty
-    (the pattern from earning_dynamics/4_parameter_test.py:_run_restart)."""
+    (the pattern from earning_dynamics/4_parameter_test.py:_run_restart).
+    ``maxiter`` overrides ``cfg.maxiter_local`` for this restart (used to give
+    exploit-heavy restarts a smaller budget)."""
     lo, hi = bounds[:, 0], bounds[:, 1]
     bounds_list = [tuple(b) for b in bounds]
+    mi = cfg.maxiter_local if maxiter is None else int(maxiter)
 
     def clipped_obj(x):
         return objective(np.clip(np.atleast_1d(x), lo, hi))
@@ -247,13 +250,13 @@ def local_search(objective, x_start, bounds, cfg):
                 try:
                     res = minimize(clipped_obj, x0=x_curr, method="Powell",
                                    bounds=bounds_list,
-                                   options={"maxiter": cfg.maxiter_local, "disp": False})
+                                   options={"maxiter": mi, "disp": False})
                 except TypeError:
                     res = minimize(penalized_obj, x0=x_curr, method="Powell",
-                                   options={"maxiter": cfg.maxiter_local, "disp": False})
+                                   options={"maxiter": mi, "disp": False})
             else:
                 res = minimize(penalized_obj, x0=x_curr, method=method,
-                               options={"maxiter": cfg.maxiter_local, "disp": False})
+                               options={"maxiter": mi, "disp": False})
             cand_x = np.clip(np.atleast_1d(res.x), lo, hi)
             cand_f = clipped_obj(cand_x)
             if np.isfinite(cand_f) and cand_f < best_f:
@@ -349,10 +352,18 @@ def _stage_local_search(coord, objective, bounds, cfg, wid):
         z_star, _ = rb if (rb is not None and rb[1] < sobol_best[1]) else sobol_best
 
         frac = (k + 1) / n_starts
-        theta_k = cfg.theta_min + (cfg.theta_max - cfg.theta_min) * frac
+        if cfg.blend_shape == "linear":
+            theta_k = cfg.theta_min + (cfg.theta_max - cfg.theta_min) * frac
+        else:  # "sqrt": concave ramp, exploits the incumbent best earlier
+            theta_k = min(max(np.sqrt(frac), cfg.theta_min), cfg.theta_max)
         x_start = np.clip(theta_k * z_star + (1.0 - theta_k) * starts[k], lo, hi)
 
-        best_x, best_f = local_search(objective, x_start, bounds, cfg)
+        # Scale the local-optimizer budget down as theta_k rises: a restart
+        # that already starts essentially at z_star needs little refinement.
+        mi = int(round(cfg.maxiter_local
+                       * (1.0 - (1.0 - cfg.maxiter_min_frac) * theta_k)))
+        best_x, best_f = local_search(objective, x_start, bounds, cfg,
+                                      maxiter=max(mi, 1))
         coord.write_local_result(k, best_x, best_f)
         n_done_local += 1
 

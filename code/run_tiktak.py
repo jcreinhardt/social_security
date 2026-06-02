@@ -54,6 +54,8 @@ def build_cfg(args):
         sobol_seed=args.sobol_seed,
         keep_best=args.keep_best,
         maxiter_local=args.maxiter,
+        maxiter_min_frac=args.maxiter_min_frac,
+        blend_shape=args.blend_shape,
         local_methods=("Powell", "Nelder-Mead"),
         theta_min=0.1,
         theta_max=0.995,
@@ -142,6 +144,8 @@ def spawn_workers(args):
         "--n-sobol", str(args.n_sobol),
         "--keep-best", str(args.keep_best),
         "--maxiter", str(args.maxiter),
+        "--maxiter-min-frac", str(args.maxiter_min_frac),
+        "--blend-shape", args.blend_shape,
         "--seed", str(args.seed),
         "--sobol-seed", str(args.sobol_seed),
     ]
@@ -180,6 +184,12 @@ def main():
     ap.add_argument("--n-sobol", type=int, default=2048)
     ap.add_argument("--keep-best", type=int, default=40)
     ap.add_argument("--maxiter", type=int, default=600)
+    ap.add_argument("--maxiter-min-frac", type=float, default=0.15,
+                    help="exploit-heavy restarts get this fraction of --maxiter "
+                         "(1.0 = no scaling)")
+    ap.add_argument("--blend-shape", choices=("sqrt", "linear"), default="sqrt",
+                    help="TikTak blend ramp: 'sqrt' (concave, exploits earlier) "
+                         "or 'linear'")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--sobol-seed", type=int, default=999)
     ap.add_argument("--real-moments", default=None,

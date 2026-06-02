@@ -59,8 +59,18 @@ class MSMConfig:
     # Stage B: local optimization
     local_methods: tuple = ("Powell", "Nelder-Mead")
     maxiter_local: int = 1_000
+    # Exploit-heavy restarts (blend weight near theta_max, start already close
+    # to the incumbent best) need far fewer iterations; the per-restart budget
+    # scales from maxiter_local (at theta_k=0) down to this fraction (at =1).
+    maxiter_min_frac: float = 0.15
 
-    # TikTak blending (theta_k ramps from theta_min -> theta_max)
+    # TikTak blending: x_start = theta_k * z_star + (1-theta_k) * sobol_start,
+    # theta_k ramping theta_min -> theta_max across the restarts.
+    #   "sqrt"   concave ramp (Guvenen-style): exploits the incumbent best
+    #            earlier, so most restarts start near it and converge in fewer
+    #            objective evaluations.
+    #   "linear" gentler ramp: more exploration, more evals.
+    blend_shape: str = "sqrt"
     theta_min: float = 0.1
     theta_max: float = 0.995
 
