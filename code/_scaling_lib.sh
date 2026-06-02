@@ -11,13 +11,14 @@
 #   OUTDIR      results dir relative to ROOT (e.g. output/scaling)
 # ---------------------------------------------------------------------------
 
-run_scaling_test() {
+# Activate the conda env, pin BLAS threads, and warm the numba cache. Shared by
+# the scaling sweep and the full 21-param run, so env fixes live in one place.
+# Requires: ROOT, ENV_NAME.
+setup_env() {
     cd "$ROOT"
     echo "Repo root: $ROOT"
     echo "Node: $(hostname)   logical CPUs: $(nproc)"
-    mkdir -p "$OUTDIR"
 
-    # ---- environment -------------------------------------------------------
     # Make conda available. On Yale's Bouchet cluster that's the miniconda
     # module; change/remove this for a different cluster.
     if command -v module >/dev/null 2>&1; then
@@ -39,17 +40,22 @@ run_scaling_test() {
     echo "Python: $(which python)"
     python -c "import numpy, scipy, numba; print('numpy', numpy.__version__, '| scipy', scipy.__version__, '| numba', numba.__version__)"
 
-    # ---- thread pinning: one BLAS thread per worker process ----------------
+    # One BLAS thread per worker process.
     export OMP_NUM_THREADS=1
     export MKL_NUM_THREADS=1
     export OPENBLAS_NUM_THREADS=1
     export NUMEXPR_NUM_THREADS=1
+    # Shared, writable numba cache so workers load compiled kernels rather than
+    # each recompiling, and warm it once before any timed/parallel run.
     export NUMBA_CACHE_DIR="$ROOT/output/numba_cache"
     mkdir -p "$NUMBA_CACHE_DIR"
-
-    # ---- warm up the numba cache once, before any timed run ----------------
     echo "Warming up numba cache ..."
     ( cd code && python -c "from msm_model import simulate_income, calculate_moments, THETA_TRUE; calculate_moments(simulate_income(THETA_TRUE, 1000, 36, 42)); print('numba kernels compiled')" )
+}
+
+run_scaling_test() {
+    mkdir -p "$OUTDIR"
+    setup_env
 
     # ---- scaling loop ------------------------------------------------------
     echo

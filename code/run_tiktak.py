@@ -41,7 +41,7 @@ import numpy as np
 import pandas as pd
 
 from msm_model import MSMConfig
-import problem_2param as prob
+from problem import Problem
 from tiktak import FileCoordinator, run_worker, read_final
 
 
@@ -64,7 +64,7 @@ def build_cfg(args):
     )
 
 
-def aggregate_and_report(coord, cfg):
+def aggregate_and_report(coord, cfg, prob):
     """Worker-0 post-processing: assemble per-start results + final estimate."""
     recs = coord.load_local_results()
     recs.sort(key=lambda r: r["f"] if np.isfinite(r["f"]) else np.inf)
@@ -75,7 +75,7 @@ def aggregate_and_report(coord, cfg):
         for j, name in enumerate(prob.FREE_NAMES):
             row[f"{name}_estimate"] = r["x"][j]
         rows.append(row)
-    csv_path = os.path.join(coord.workdir, "tiktak_2param_results.csv")
+    csv_path = os.path.join(coord.workdir, "tiktak_results.csv")
     pd.DataFrame(rows).to_csv(csv_path, index=False)
 
     final = read_final(coord)
@@ -88,6 +88,7 @@ def aggregate_and_report(coord, cfg):
         "free_names": prob.FREE_NAMES,
         "estimate": best_x.tolist(),
         "truth": prob.FREE_TRUE.tolist(),
+        "n_free": prob.N_FREE,
         "n_starts": len(recs),
         "config": {
             "n_sim": cfg.n_sim, "n_sobol": cfg.sobol_draws,
@@ -99,19 +100,20 @@ def aggregate_and_report(coord, cfg):
         json.dump(summary, fh, indent=2)
 
     print("\n" + "=" * 60)
-    print("ESTIMATION COMPLETE  (free: " + ", ".join(prob.FREE_NAMES) + ")")
+    print(f"ESTIMATION COMPLETE  ({prob.N_FREE} free parameters)")
     print("=" * 60)
     print(f"Objective: {final['f']:.6e}")
-    print(f"\n{'Param':10s} {'Estimate':>14s} {'Truth':>14s} {'Diff':>14s}")
-    print("-" * 54)
+    print(f"\n{'Param':12s} {'Estimate':>14s} {'Guvenen':>14s} {'Diff':>14s}")
+    print("-" * 56)
     for j, name in enumerate(prob.FREE_NAMES):
         diff = best_x[j] - prob.FREE_TRUE[j]
-        print(f"{name:10s} {best_x[j]:14.6f} {prob.FREE_TRUE[j]:14.6f} {diff:+14.6f}")
+        print(f"{name:12s} {best_x[j]:14.6f} {prob.FREE_TRUE[j]:14.6f} {diff:+14.6f}")
     print(f"\nResults written to {coord.workdir}")
 
 
 def run_one_worker(args):
     cfg = build_cfg(args)
+    prob = Problem(args.free)
     coord = FileCoordinator(args.workdir)
     real_path = args.real_moments if args.real_moments else None
 
@@ -119,13 +121,13 @@ def run_one_worker(args):
     if args.worker_id == 0:
         print(f"[worker 0] building objective "
               f"({'real' if real_path else 'synthetic'} targets, "
-              f"n_sim={cfg.n_sim}) ...", flush=True)
+              f"{prob.N_FREE} free params, n_sim={cfg.n_sim}) ...", flush=True)
     objective = prob.make_objective(cfg, real_data_path=real_path)
 
     run_worker(coord, objective, prob.FREE_BOUNDS, cfg, wid=args.worker_id)
 
     if args.worker_id == 0:
-        aggregate_and_report(coord, cfg)
+        aggregate_and_report(coord, cfg, prob)
         print(f"[worker 0] wall time {time.time() - t0:.1f}s", flush=True)
 
 
@@ -146,6 +148,7 @@ def spawn_workers(args):
         "--maxiter", str(args.maxiter),
         "--maxiter-min-frac", str(args.maxiter_min_frac),
         "--blend-shape", args.blend_shape,
+        "--free", args.free,
         "--seed", str(args.seed),
         "--sobol-seed", str(args.sobol_seed),
     ]
@@ -180,6 +183,10 @@ def main():
     ap.add_argument("--resume", action="store_true",
                     help="do not wipe the workdir before spawning")
     # problem / config knobs
+    ap.add_argument("--free", default="a1,rho1",
+                    help="which parameters to estimate: 'all' (full 21-param "
+                         "problem) or a comma-separated subset like 'a1,rho1' "
+                         "(the rest are fixed at the Guvenen values)")
     ap.add_argument("--n-sim", type=int, default=25_000)
     ap.add_argument("--n-sobol", type=int, default=2048)
     ap.add_argument("--keep-best", type=int, default=40)

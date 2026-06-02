@@ -260,18 +260,55 @@ At `n_sim=25000` that's ~425 MB/worker → ~32 GB (with headroom) at 60 cores,
 which is why the full script requests 48 GB; the quick run needs ~4 GB. Re-run
 it if you change `n_sim` (memory scales with it).
 
+### Choosing which parameters to estimate
+`--free` selects the free parameters; the rest stay at their Guvenen values.
+Default is `a1,rho1` (the 2-param test bed). For the **full 21-parameter
+problem** pass `--free all`, or any comma-separated subset, e.g.
+`--free a0,a1,a2,rho1`:
+```bash
+conda run -n socsec_mac python code/run_tiktak.py --spawn 8 --free all \
+    --n-sim 25000 --n-sobol 50000 --keep-best 480 --maxiter 1500 \
+    --workdir output/run_21param
+```
+
+### Full 21-parameter run on an HPC + plots
+`hpc_full_21param.sh` solves all 21 parameters on one 96-core node against
+synthetic targets (so the known answer for each is its Guvenen value), then runs
+`plot_results.py` to produce two figures in the run dir:
+- `params_vs_guvenen.png` — the found minimum vs. the Guvenen value for every
+  parameter, as normalized positions within each parameter's search bounds.
+- `objective_slices.png` — a 1-D slice of the objective along each parameter
+  (others held at the estimate), marking the estimate and the Guvenen value, so
+  you can see how well each parameter is identified.
+```bash
+sbatch code/hpc_full_21param.sh
+# or regenerate plots from a finished run:
+python code/plot_results.py output/run_21param
+```
+The defaults are a sensible first solve, not Guvenen's full budget (900k Sobol /
+2000 restarts) — scale `N_SOBOL`/`KEEP_BEST` up (and `--time`/`--mem`) for a more
+thorough global search. 21-D local searches are far more expensive than 2-D, so
+expect this to run for hours.
+
 ### Key flags
 `--spawn N` local workers · `--worker-id`/`--workers` array mode ·
-`--workdir` shared dir · `--n-sim` individuals · `--n-sobol` Sobol draws ·
-`--keep-best` local starts · `--maxiter` local-opt iterations ·
-`--blend-shape sqrt|linear` · `--maxiter-min-frac` (exploit-restart budget,
-1.0 = no scaling) · `--seed` CRN seed · `--sobol-seed` shared Sobol scramble
-seed · `--real-moments PATH` · `--resume`.
+`--free all|<names>` parameters to estimate · `--workdir` shared dir ·
+`--n-sim` individuals · `--n-sobol` Sobol draws · `--keep-best` local starts ·
+`--maxiter` local-opt iterations · `--blend-shape sqrt|linear` ·
+`--maxiter-min-frac` (exploit-restart budget, 1.0 = no scaling) · `--seed` CRN
+seed · `--sobol-seed` shared Sobol scramble seed · `--real-moments PATH` ·
+`--resume`.
 
 ## 6. Files
 - `msm_model.py` — DGP, moments, SMM objective (the hot path).
-- `problem_2param.py` — the 2-free-parameter (`a1`, `rho1`) problem + synthetic targets.
+- `problem.py` — `Problem` over any free-parameter subset (incl. all 21) + targets.
+- `problem_2param.py` — thin specialization (`a1`, `rho1`) for the test bed.
 - `tiktak.py` — file-coordinated TikTak engine (`FileCoordinator`, `run_worker`).
 - `run_tiktak.py` — CLI / worker entry point and result aggregation.
+- `plot_results.py` — recovery + objective-slice figures from a finished run.
+- `benchmark.py`, `mem_benchmark.py` — per-step timing and memory sizing.
+- `hpc_scaling_test.sh` / `hpc_scaling_quick.sh` / `hpc_full_21param.sh` +
+  `_scaling_lib.sh` / `scaling_report.py` — HPC scaling sweep, fast sanity run,
+  and the full 96-core solve.
 
 Reused, validated economics core from `../earning_dynamics/code/msm_optimizer.py`.
