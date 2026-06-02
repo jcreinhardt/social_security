@@ -16,10 +16,14 @@ venv/
 env/
 
 # Data and output — collaborate via Dropbox, not git
-data/
-output/
+# (use data/* not data/ so the README can be re-included; git can't negate a
+#  file whose parent directory is wholesale-ignored)
+data/*
+output/*
 !data/.gitkeep
 !output/.gitkeep
+!data/README.md
+!output/README.md
 
 # macOS zip metadata
 __MACOSX/
