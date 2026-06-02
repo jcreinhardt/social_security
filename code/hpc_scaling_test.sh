@@ -4,8 +4,8 @@
 #SBATCH --ntasks=1                # one launcher task; it spawns the workers itself
 #SBATCH --cpus-per-task=60        # >= max core count tested below; match your node
 #SBATCH --exclusive               # own the whole node for clean timings
-#SBATCH --time=03:00:00
-#SBATCH --mem=48G
+#SBATCH --time=00:30:00
+#SBATCH --mem=128G
 #SBATCH --output=tiktak_scaling_%j.out
 # ---------------------------------------------------------------------------
 # Self-contained intra-node scaling + accuracy test for the 2-parameter TikTak
