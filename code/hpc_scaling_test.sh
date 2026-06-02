@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/bin/bash -l
+# (login shell: initializes the module system so `module load` works in batch)
 #SBATCH --job-name=tiktak_scaling
 #SBATCH --nodes=1                 # single node: this is an intra-node scaling test
 #SBATCH --ntasks=1                # one launcher task; it spawns the workers itself
