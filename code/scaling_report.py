@@ -1,7 +1,7 @@
 """
 scaling_report.py
 =================
-Aggregate the per-core-count runs produced by hpc_scaling_test.slurm into a
+Aggregate the per-core-count runs produced by hpc_scaling_test.sh into a
 single speed + accuracy comparison table.
 
 Reads each ``<base>/cores_<N>/final_results.json`` (written by run_tiktak's

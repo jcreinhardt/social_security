@@ -214,12 +214,12 @@ fresh per run; the workers do not wipe it in array mode.)
 files into `../data/intermediate/` and add `--real-moments ../data`.
 
 ### Intra-node scaling test (HPC)
-`hpc_scaling_test.slurm` is a self-contained SLURM job that runs the *same*
+`hpc_scaling_test.sh` is a self-contained SLURM job that runs the *same*
 2-parameter problem at several core counts on one node (default 12/24/36/48/60)
 and reports speed + accuracy. Copy the repo (`code/` + `data/` +
 `environment.yml`) to the cluster and submit from the repo root:
 ```bash
-sbatch code/hpc_scaling_test.slurm
+sbatch code/hpc_scaling_test.sh
 ```
 It creates/activates the conda env from `environment.yml`, pins one BLAS thread
 per worker, warms the numba cache once (so the first config isn't charged for
