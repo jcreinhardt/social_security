@@ -33,6 +33,12 @@ import matplotlib
 matplotlib.use("Agg")  # headless (HPC nodes have no display)
 import matplotlib.pyplot as plt
 
+# Make ./lib importable (entry points stay flat at code/; the library modules
+# live in code/lib/). Must precede the library imports below.
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "lib"))
+
 from msm_model import MSMConfig
 from problem import Problem
 

@@ -313,8 +313,12 @@ a `run_meta.json` at start so this works before the run finishes.
 seed · `--sobol-seed` shared Sobol scramble seed · `--real-moments PATH` ·
 `--resume`.
 
-## 6. Files
-**Economics core** (the hot path), split by responsibility:
+## 6. Layout
+The things you *run* sit flat in `code/`; the importable library lives in
+`code/lib/`. Each entry point adds `lib/` to `sys.path` at startup, so run
+commands and imports are unaffected by the split.
+
+**`code/lib/` — the importable library** (economics core split by responsibility):
 - `params.py` — the 21 parameter names, Guvenen values (`THETA_TRUE`), bounds.
 - `config.py` — `MSMConfig` (all run knobs).
 - `dgp.py` — frozen-shock draws + `simulate_income` (Fortran `SIMULATE`/`SIM_RN`).
@@ -323,18 +327,19 @@ seed · `--sobol-seed` shared Sobol scramble seed · `--real-moments PATH` ·
 - `targets.py` — synthetic + real (`.dat`) target moments.
 - `msm_model.py` — back-compat shim re-exporting all of the above (so
   `from msm_model import …` and notebooks keep working).
-
-**Problem / optimizer / CLI:**
 - `problem.py` — `Problem` over any free-parameter subset (incl. all 21).
 - `problem_2param.py` — thin specialization (`a1`, `rho1`) for the test bed.
 - `tiktak.py` — file-coordinated TikTak engine (`FileCoordinator`, `run_worker`).
+
+**`code/` — entry points you run directly:**
 - `run_tiktak.py` — CLI / worker entry point and result aggregation.
-- `plot_results.py` — recovery + objective-slice figures from a finished run.
 - `monitor.py` — read-only live progress snapshot (current best vs Guvenen).
+- `plot_results.py` — recovery + objective-slice figures from a finished run.
 - `benchmark.py`, `mem_benchmark.py` — per-step timing and memory sizing.
+- `scaling_report.py` — assemble the scaling-sweep comparison table.
 - `hpc_scaling_test.sh` / `hpc_scaling_quick.sh` / `hpc_full_21param.sh` +
-  `_scaling_lib.sh` / `scaling_report.py` — HPC scaling sweep, fast sanity run,
-  and the full multi-core solve.
+  `_scaling_lib.sh` — HPC scaling sweep, fast sanity run, and the full
+  multi-core solve.
 
 Reused, validated economics core from `../earning_dynamics/code/msm_optimizer.py`.
 
