@@ -25,14 +25,15 @@ setup_env() {
         module load miniconda/24.11.3
     fi
     if command -v conda >/dev/null 2>&1; then
-        set +u   # conda's shell hook references unbound vars under `set -u`
+        # NB: scripts run without `set -u` (nounset) on purpose -- conda's
+        # activate/deactivate hooks (e.g. the gcc_linux-64 compiler package)
+        # reference unbound variables and would otherwise abort activation.
         source "$(conda info --base)/etc/profile.d/conda.sh"
         if ! conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
             echo "Creating conda env '$ENV_NAME' from environment.yml ..."
             conda env create -f environment.yml -n "$ENV_NAME"
         fi
         conda activate "$ENV_NAME"
-        set -u
     else
         echo "ERROR: conda not found. Load it via 'module load' or install miniconda." >&2
         exit 1

@@ -19,7 +19,7 @@
 # For a quick pipeline sanity check that schedules fast, use the companion
 # hpc_scaling_quick.sh instead. The shared body lives in _scaling_lib.sh.
 # ---------------------------------------------------------------------------
-set -euo pipefail
+set -eo pipefail   # not -u: conda's activate/deactivate hooks use unbound vars
 
 ROOT="${SLURM_SUBMIT_DIR:-$(pwd)}"
 ENV_NAME="${ENV_NAME:-socsec_mac}"

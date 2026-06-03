@@ -22,7 +22,7 @@
 #   final_results.json, tiktak_results.csv, run_meta.json,
 #   params_vs_guvenen.png, objective_slices.png
 # ---------------------------------------------------------------------------
-set -euo pipefail
+set -eo pipefail   # not -u: conda's activate/deactivate hooks use unbound vars
 
 ROOT="${SLURM_SUBMIT_DIR:-$(pwd)}"
 ENV_NAME="${ENV_NAME:-socsec_mac}"

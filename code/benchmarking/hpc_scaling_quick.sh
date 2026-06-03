@@ -23,7 +23,7 @@
 # Results land in output/scaling_quick/ (separate from the full run's
 # output/scaling/). Shared body: _scaling_lib.sh.
 # ---------------------------------------------------------------------------
-set -euo pipefail
+set -eo pipefail   # not -u: conda's activate/deactivate hooks use unbound vars
 
 ROOT="${SLURM_SUBMIT_DIR:-$(pwd)}"
 ENV_NAME="${ENV_NAME:-socsec_mac}"

@@ -27,7 +27,7 @@
 # To fit real PSID moments instead of synthetic, drop the .dat files into
 # ../data/intermediate and add `--real-moments "$ROOT/data"` to the run + plot.
 # ---------------------------------------------------------------------------
-set -euo pipefail
+set -eo pipefail   # not -u: conda's activate/deactivate hooks use unbound vars
 
 ROOT="${SLURM_SUBMIT_DIR:-$(pwd)}"
 ENV_NAME="${ENV_NAME:-socsec_mac}"
