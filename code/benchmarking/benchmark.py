@@ -4,7 +4,7 @@ benchmark.py
 Times the building blocks of one objective evaluation and the local-search
 step, to see where wall time goes. Run:
 
-    conda run -n socsec_mac python code/benchmark.py --n-sim 10000 --reps 20
+    conda run -n socsec_mac python code/benchmarking/benchmark.py --n-sim 10000 --reps 20
 """
 
 import argparse
@@ -12,11 +12,11 @@ import time
 
 import numpy as np
 
-# Make ./lib importable (entry points stay flat at code/; the library modules
-# live in code/lib/). Must precede the library imports below.
+# Make the library importable (it lives in code/algorithm/; this script is in
+# code/benchmarking/). Must precede the library imports below.
 import os as _os
 import sys as _sys
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "lib"))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "algorithm"))
 
 from msm_model import (
     MSMConfig, THETA_TRUE, simulate_income, calculate_moments,

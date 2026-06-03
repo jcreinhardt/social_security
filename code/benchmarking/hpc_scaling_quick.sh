@@ -18,7 +18,7 @@
 # that speed improves with cores. Run the full hpc_scaling_test.sh for real
 # numbers.
 #
-#     sbatch code/hpc_scaling_quick.sh
+#     sbatch code/benchmarking/hpc_scaling_quick.sh
 #
 # Results land in output/scaling_quick/ (separate from the full run's
 # output/scaling/). Shared body: _scaling_lib.sh.
@@ -38,5 +38,5 @@ SEED=42
 SOBOL_SEED=999
 OUTDIR="output/scaling_quick"
 
-source "$ROOT/code/_scaling_lib.sh"
+source "$ROOT/code/benchmarking/_scaling_lib.sh"
 run_scaling_test

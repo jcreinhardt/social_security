@@ -228,12 +228,12 @@ files into `../data/intermediate/` and add `--real-moments ../data`.
 and reports speed + accuracy. Copy the repo (`code/` + `data/` +
 `environment.yml`) to the cluster and submit from the repo root:
 ```bash
-sbatch code/hpc_scaling_test.sh
+sbatch code/benchmarking/hpc_scaling_test.sh
 ```
 It creates/activates the conda env from `environment.yml`, pins one BLAS thread
 per worker, warms the numba cache once (so the first config isn't charged for
 JIT compilation), times each run, and writes `output/scaling/scaling_summary.csv`
-plus per-core logs. `scaling_report.py output/scaling` rebuilds the table:
+plus per-core logs. `code/benchmarking/scaling_report.py output/scaling` rebuilds the table:
 core count, wall time, speedup + parallel efficiency (relative to the smallest
 count), objective, and the `a1`/`rho1` estimate and error vs. truth. Edit the
 knobs at the top of the script (`CORES_LIST`, `N_SIM`, `N_SOBOL`, `KEEP_BEST`,
@@ -254,7 +254,7 @@ their body via `_scaling_lib.sh`, so env fixes apply to both.
 (the job runs N independent processes, so total ≈ N × per-worker — and SLURM's
 `MaxRSS` undercounts that, reporting only the largest single process):
 ```bash
-python mem_benchmark.py --n-sim 25000 --cores 12 24 36 48 60
+python code/benchmarking/mem_benchmark.py --n-sim 25000 --cores 12 24 36 48 60
 ```
 At `n_sim=25000` that's ~425 MB/worker → ~32 GB (with headroom) at 60 cores,
 which is why the full script requests 48 GB; the quick run needs ~4 GB. Re-run
@@ -281,7 +281,7 @@ synthetic targets (so the known answer for each is its Guvenen value), then runs
   (others held at the estimate), marking the estimate and the Guvenen value, so
   you can see how well each parameter is identified.
 ```bash
-sbatch code/hpc_full_21param.sh
+sbatch code/runs/hpc_full_21param.sh
 # or regenerate plots from a finished run:
 python code/plot_results.py output/run_21param
 ```
@@ -314,11 +314,22 @@ seed · `--sobol-seed` shared Sobol scramble seed · `--real-moments PATH` ·
 `--resume`.
 
 ## 6. Layout
-The things you *run* sit flat in `code/`; the importable library lives in
-`code/lib/`. Each entry point adds `lib/` to `sys.path` at startup, so run
-commands and imports are unaffected by the split.
+```
+code/
+  algorithm/      the importable library (engine + economics core)
+  benchmarking/   scaling + performance tooling and SLURM scripts
+  runs/           per-parameterization estimation run configs
+  tests/          pytest suite + reference data
+  run_tiktak.py  monitor.py  plot_results.py    entry points you run directly
+  README.md  pytest.ini
+```
+The things you *run* most often (`run_tiktak.py`, `monitor.py`, `plot_results.py`)
+sit flat in `code/`, so those commands are unchanged. Each entry point adds
+`algorithm/` to `sys.path` at startup, so imports work without installing
+anything.
 
-**`code/lib/` — the importable library** (economics core split by responsibility):
+**`code/algorithm/` — the importable library** (economics core split by
+responsibility):
 - `params.py` — the 21 parameter names, Guvenen values (`THETA_TRUE`), bounds.
 - `config.py` — `MSMConfig` (all run knobs).
 - `dgp.py` — frozen-shock draws + `simulate_income` (Fortran `SIMULATE`/`SIM_RN`).
@@ -331,15 +342,20 @@ commands and imports are unaffected by the split.
 - `problem_2param.py` — thin specialization (`a1`, `rho1`) for the test bed.
 - `tiktak.py` — file-coordinated TikTak engine (`FileCoordinator`, `run_worker`).
 
-**`code/` — entry points you run directly:**
+**`code/` (top level) — entry points you run directly:**
 - `run_tiktak.py` — CLI / worker entry point and result aggregation.
 - `monitor.py` — read-only live progress snapshot (current best vs Guvenen).
 - `plot_results.py` — recovery + objective-slice figures from a finished run.
+
+**`code/benchmarking/` — performance tooling:**
 - `benchmark.py`, `mem_benchmark.py` — per-step timing and memory sizing.
 - `scaling_report.py` — assemble the scaling-sweep comparison table.
-- `hpc_scaling_test.sh` / `hpc_scaling_quick.sh` / `hpc_full_21param.sh` +
-  `_scaling_lib.sh` — HPC scaling sweep, fast sanity run, and the full
-  multi-core solve.
+- `hpc_scaling_test.sh` / `hpc_scaling_quick.sh` + `_scaling_lib.sh` — the
+  intra-node scaling sweep and its fast sanity variant (shared body).
+
+**`code/runs/` — estimation run configs:**
+- `hpc_full_21param.sh` — the full 21-parameter solve + result plots. (Sources
+  `setup_env` from `../benchmarking/_scaling_lib.sh`.)
 
 Reused, validated economics core from `../earning_dynamics/code/msm_optimizer.py`.
 

@@ -11,7 +11,7 @@ parallel efficiency relative to the smallest core count, the objective, and the
 estimate + error vs. the known truth for each free parameter.
 
 Usage:
-    python scaling_report.py [base_dir]      # default base: output/scaling
+    python code/benchmarking/scaling_report.py [base_dir]   # default: output/scaling
 """
 
 import csv

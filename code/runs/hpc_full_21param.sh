@@ -15,7 +15,7 @@
 # produces two figures comparing the found minimum to the Guvenen values and
 # showing a slice of the objective along each parameter.
 #
-#     sbatch code/hpc_full_21param.sh
+#     sbatch code/runs/hpc_full_21param.sh
 #
 # Outputs in output/run_21param/:
 #   final_results.json, tiktak_results.csv,
@@ -42,7 +42,7 @@ SEED=42
 SOBOL_SEED=999
 WORKDIR="output/run_21param"
 
-source "$ROOT/code/_scaling_lib.sh"
+source "$ROOT/code/benchmarking/_scaling_lib.sh"
 setup_env
 
 echo

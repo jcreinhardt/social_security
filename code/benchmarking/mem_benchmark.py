@@ -11,7 +11,7 @@ multi-process job. Instead, this measures ONE worker's peak resident memory
 extrapolates to N workers.
 
 Usage:
-    python mem_benchmark.py --n-sim 25000 --cores 12 24 36 48 60
+    python code/benchmarking/mem_benchmark.py --n-sim 25000 --cores 12 24 36 48 60
 """
 
 import argparse
@@ -20,11 +20,11 @@ import sys
 
 import numpy as np
 
-# Make ./lib importable (entry points stay flat at code/; the library modules
-# live in code/lib/). Must precede the library imports below.
+# Make the library importable (it lives in code/algorithm/; this script is in
+# code/benchmarking/). Must precede the library imports below.
 import os as _os
 import sys as _sys
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "lib"))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "algorithm"))
 
 from msm_model import MSMConfig
 import problem_2param as prob

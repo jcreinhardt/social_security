@@ -20,11 +20,11 @@ import time
 
 import numpy as np
 
-# Make ./lib importable (entry points stay flat at code/; the library modules
-# live in code/lib/). Must precede the library import below.
+# Make ./algorithm importable (entry points stay flat at code/; the library
+# modules live in code/algorithm/). Must precede the library import below.
 import os as _os
 import sys as _sys
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "lib"))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "algorithm"))
 
 from msm_model import PARAM_NAMES, PARAM_BOUNDS, THETA_TRUE
 

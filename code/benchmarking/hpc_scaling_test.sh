@@ -12,7 +12,7 @@
 # Self-contained intra-node scaling + accuracy test for the 2-parameter TikTak
 # MSM problem. Copy the repo (code/ + data/ + environment.yml) to the HPC, then:
 #
-#     sbatch code/hpc_scaling_test.sh
+#     sbatch code/benchmarking/hpc_scaling_test.sh
 #
 # It runs the SAME problem at several core counts on ONE node, times each run,
 # and writes output/scaling/scaling_summary.csv comparing speed + accuracy.
@@ -34,5 +34,5 @@ SEED=42
 SOBOL_SEED=999
 OUTDIR="output/scaling"
 
-source "$ROOT/code/_scaling_lib.sh"
+source "$ROOT/code/benchmarking/_scaling_lib.sh"
 run_scaling_test

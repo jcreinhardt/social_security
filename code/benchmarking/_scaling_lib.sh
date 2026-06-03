@@ -50,7 +50,7 @@ setup_env() {
     export NUMBA_CACHE_DIR="$ROOT/output/numba_cache"
     mkdir -p "$NUMBA_CACHE_DIR"
     echo "Warming up numba cache ..."
-    ( cd code/lib && python -c "from msm_model import simulate_income, calculate_moments, THETA_TRUE; calculate_moments(simulate_income(THETA_TRUE, 1000, 36, 42)); print('numba kernels compiled')" )
+    ( cd code/algorithm && python -c "from msm_model import simulate_income, calculate_moments, THETA_TRUE; calculate_moments(simulate_income(THETA_TRUE, 1000, 36, 42)); print('numba kernels compiled')" )
 }
 
 run_scaling_test() {
@@ -87,7 +87,7 @@ run_scaling_test() {
 
     # ---- comparison report -------------------------------------------------
     echo "Building scaling report ..."
-    ( cd code && python scaling_report.py "$ROOT/$OUTDIR" )
+    ( cd code/benchmarking && python scaling_report.py "$ROOT/$OUTDIR" )
     echo
     echo "Done. See $OUTDIR/scaling_summary.csv and the per-core logs."
 }
