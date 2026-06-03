@@ -290,6 +290,20 @@ The defaults are a sensible first solve, not Guvenen's full budget (900k Sobol /
 thorough global search. 21-D local searches are far more expensive than 2-D, so
 expect this to run for hours.
 
+### Monitoring a live run
+While a job is optimizing, snapshot its progress without disturbing it —
+`monitor.py` is read-only and reads only the small coordination files (not the
+tens-of-thousands of Sobol results), so it's safe to run anytime against the
+shared work directory:
+```bash
+python code/monitor.py output/run_21param           # one-shot
+watch -n 30 python code/monitor.py output/run_21param   # refresh every 30s
+```
+It prints the current phase, Sobol/local-stage progress, the current best
+objective, and a table of the current-best parameters vs. their Guvenen values
+(with each parameter's error as a % of its bound range). `run_tiktak.py` writes
+a `run_meta.json` at start so this works before the run finishes.
+
 ### Key flags
 `--spawn N` local workers · `--worker-id`/`--workers` array mode ·
 `--free all|<names>` parameters to estimate · `--workdir` shared dir ·
@@ -306,6 +320,7 @@ seed · `--sobol-seed` shared Sobol scramble seed · `--real-moments PATH` ·
 - `tiktak.py` — file-coordinated TikTak engine (`FileCoordinator`, `run_worker`).
 - `run_tiktak.py` — CLI / worker entry point and result aggregation.
 - `plot_results.py` — recovery + objective-slice figures from a finished run.
+- `monitor.py` — read-only live progress snapshot (current best vs Guvenen).
 - `benchmark.py`, `mem_benchmark.py` — per-step timing and memory sizing.
 - `hpc_scaling_test.sh` / `hpc_scaling_quick.sh` / `hpc_full_21param.sh` +
   `_scaling_lib.sh` / `scaling_report.py` — HPC scaling sweep, fast sanity run,

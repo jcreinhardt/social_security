@@ -119,9 +119,24 @@ def run_one_worker(args):
 
     t0 = time.time()
     if args.worker_id == 0:
+        # Drop metadata so a live monitor can interpret progress (which params
+        # are free + their Guvenen values) before final_results.json exists.
+        with open(os.path.join(coord.workdir, "run_meta.json"), "w") as fh:
+            json.dump({
+                "free_names": prob.FREE_NAMES,
+                "truth": prob.FREE_TRUE.tolist(),
+                "n_free": prob.N_FREE,
+                "config": {
+                    "n_sim": cfg.n_sim, "n_sobol": cfg.sobol_draws,
+                    "keep_best": cfg.keep_best, "maxiter_local": cfg.maxiter_local,
+                    "seed": cfg.seed, "sobol_seed": cfg.sobol_seed,
+                },
+            }, fh, indent=2)
         print(f"[worker 0] building objective "
               f"({'real' if real_path else 'synthetic'} targets, "
               f"{prob.N_FREE} free params, n_sim={cfg.n_sim}) ...", flush=True)
+        print(f"[worker 0] monitor live with:  "
+              f"python code/monitor.py {args.workdir}", flush=True)
     objective = prob.make_objective(cfg, real_data_path=real_path)
 
     run_worker(coord, objective, prob.FREE_BOUNDS, cfg, wid=args.worker_id)
