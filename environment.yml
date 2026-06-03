@@ -264,4 +264,5 @@ dependencies:
   - matplotlib-label-lines==0.7.0
   - more-itertools==10.3.0
   - pwlf==2.2.1
+  - pytest==9.0.3
 name: socsec_mac

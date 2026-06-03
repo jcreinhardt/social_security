@@ -314,8 +314,18 @@ seed · `--sobol-seed` shared Sobol scramble seed · `--real-moments PATH` ·
 `--resume`.
 
 ## 6. Files
-- `msm_model.py` — DGP, moments, SMM objective (the hot path).
-- `problem.py` — `Problem` over any free-parameter subset (incl. all 21) + targets.
+**Economics core** (the hot path), split by responsibility:
+- `params.py` — the 21 parameter names, Guvenen values (`THETA_TRUE`), bounds.
+- `config.py` — `MSMConfig` (all run knobs).
+- `dgp.py` — frozen-shock draws + `simulate_income` (Fortran `SIMULATE`/`SIM_RN`).
+- `moments.py` — the numba moment kernels + `calculate_moments` (Fortran `MOMENTS`).
+- `objective.py` — weights/ψ, `deviation_F`, `msm_objective` (Fortran `dfovec`).
+- `targets.py` — synthetic + real (`.dat`) target moments.
+- `msm_model.py` — back-compat shim re-exporting all of the above (so
+  `from msm_model import …` and notebooks keep working).
+
+**Problem / optimizer / CLI:**
+- `problem.py` — `Problem` over any free-parameter subset (incl. all 21).
 - `problem_2param.py` — thin specialization (`a1`, `rho1`) for the test bed.
 - `tiktak.py` — file-coordinated TikTak engine (`FileCoordinator`, `run_worker`).
 - `run_tiktak.py` — CLI / worker entry point and result aggregation.
@@ -324,6 +334,22 @@ seed · `--sobol-seed` shared Sobol scramble seed · `--real-moments PATH` ·
 - `benchmark.py`, `mem_benchmark.py` — per-step timing and memory sizing.
 - `hpc_scaling_test.sh` / `hpc_scaling_quick.sh` / `hpc_full_21param.sh` +
   `_scaling_lib.sh` / `scaling_report.py` — HPC scaling sweep, fast sanity run,
-  and the full 96-core solve.
+  and the full multi-core solve.
 
 Reused, validated economics core from `../earning_dynamics/code/msm_optimizer.py`.
+
+## 7. Tests
+A pytest suite under `code/tests/` guards the invariants we relied on during
+development. Run from `code/` (needs `pytest`, pinned in `../environment.yml`):
+```bash
+cd code && pytest              # full suite (~30s; the recovery test optimizes)
+cd code && pytest -m "not slow"   # fast subset (~1s): regression + coordinator
+```
+- `test_moments.py` — **regression** of the moment vector at `THETA_TRUE` vs. a
+  committed reference (`tests/data/ref_moments_*.npy`); locks the hot path to
+  `rtol=1e-6`. Regenerate the reference deliberately if you change a moment
+  definition (command in the test's docstring).
+- `test_coordinator.py` — `FileCoordinator`: `claim_next` hands out each index
+  exactly once under concurrency, state transitions, `read_best`, locking.
+- `test_recovery.py` — tiny 2-param synthetic end-to-end; asserts `a1`/`rho1`
+  recovery (marked `slow`).
