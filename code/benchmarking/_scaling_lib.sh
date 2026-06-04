@@ -46,8 +46,13 @@ setup_env() {
         set +u
         source "$(conda info --base)/etc/profile.d/conda.sh"
         if ! conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
-            echo "Creating conda env '$ENV_NAME' from environment.yml ..."
-            conda env create -f environment.yml -n "$ENV_NAME"
+            # Build a SLIM, cross-platform env with just the runtime deps,
+            # pinned to the versions used on Bouchet. We deliberately do NOT use
+            # environment.yml here: it's a full macOS export (~250 pinned
+            # builds) whose solve crawls or fails on a different Linux cluster.
+            echo "Creating conda env '$ENV_NAME' (slim runtime deps) ..."
+            conda create -y -n "$ENV_NAME" -c conda-forge \
+                python=3.11 numpy=1.24 scipy=1.13 pandas=2.1 numba=0.58 matplotlib pytest
         fi
         conda activate "$ENV_NAME"
     else

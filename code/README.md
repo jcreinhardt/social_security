@@ -375,10 +375,13 @@ Yale Bouchet (`miniconda/24.11.3`) and the second cluster
 ```bash
 sbatch --export=ALL,CONDA_MODULE=anaconda3/2023.09-0-k3at code/runs/hpc_full_21param.sh
 ```
-If the conda env doesn't exist yet on the new cluster, `setup_env` builds it from
-`environment.yml`; if that solve fails (the file is a macOS export), create a
-slim env once — `conda create -n socsec_mac python=3.11 numpy scipy pandas numba
-matplotlib pytest` — and it'll be reused. Override the env name with `ENV_NAME`.
+If the conda env doesn't exist yet on the new cluster, `setup_env` builds a
+**slim, cross-platform env** with just the runtime deps (pinned to the Bouchet
+versions: `python=3.11 numpy=1.24 scipy=1.13 pandas=2.1 numba=0.58 matplotlib
+pytest`, from conda-forge). It deliberately does *not* build from
+`environment.yml` — that's a full macOS export whose solve crawls or fails on a
+different Linux cluster. Override the env name with `ENV_NAME`. (`environment.yml`
+remains the record of the original full Bouchet env if you ever want it.)
 
 ## 7. Tests
 A pytest suite under `code/tests/` guards the invariants we relied on during
