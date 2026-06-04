@@ -35,17 +35,20 @@ set -eo pipefail   # not -u: conda's activate/deactivate hooks use unbound vars
 ROOT="${SLURM_SUBMIT_DIR:-$(pwd)}"
 ENV_NAME="${ENV_NAME:-socsec_mac}"
 
-# ---- knobs (sized to finish within default_queue's 4h cap on 32 cores) -----
-# For a more thorough solve, move to a partition with no wall cap (e.g.
-# `sbatch --partition=cpunormal --time=24:00:00 ...`) and scale these back up
-# (e.g. N_SOBOL=50000, KEEP_BEST=480, MAXITER=1500, N_SIM=25000).
-CORES=32
-N_SIM=20000
-N_SOBOL=20000                     # Sobol screen (21-dim needs broad coverage)
-KEEP_BEST=96                      # local restarts; >= CORES so stage B uses all
-MAXITER=800                       # 21-dim local searches need more iterations
-SEED=42
-SOBOL_SEED=999
+# ---- knobs (env-overridable; defaults sized for default_queue's 4h / 32 cores)
+# Override per cluster via env vars -- easiest through the launcher
+# code/runs/submit_full.sh, which also sets the matching --partition/--time/
+# --cpus-per-task. e.g. on Bouchet 'day' (64 cores, 1 day, full workload):
+#   PARTITION=day CORES=64 WALLTIME=1-00:00:00 \
+#     N_SIM=25000 N_SOBOL=50000 KEEP_BEST=480 MAXITER=1500 \
+#     code/runs/submit_full.sh
+CORES="${CORES:-32}"              # must match --cpus-per-task (launcher keeps them in sync)
+N_SIM="${N_SIM:-20000}"
+N_SOBOL="${N_SOBOL:-20000}"       # Sobol screen (21-dim needs broad coverage)
+KEEP_BEST="${KEEP_BEST:-96}"      # local restarts; >= CORES so stage B uses all
+MAXITER="${MAXITER:-800}"         # 21-dim local searches need more iterations
+SEED="${SEED:-42}"
+SOBOL_SEED="${SOBOL_SEED:-999}"
 WORKDIR="output/run_21param"
 DATA="$ROOT/data"                 # real Guvenen moments in $DATA/intermediate/*.dat
 

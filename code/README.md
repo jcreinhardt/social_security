@@ -281,10 +281,28 @@ conda run -n socsec_mac python code/run_tiktak.py --spawn 8 --free all \
   (others held at the estimate), marking the estimate and the Guvenen value, so
   you can see how well each parameter is identified.
 ```bash
-sbatch code/runs/hpc_full_21param.sh
+sbatch code/runs/hpc_full_21param.sh           # bare submit (uses the #SBATCH defaults)
 # or regenerate plots from a finished run (use the same target source):
 python code/plot_results.py output/run_21param --real-moments data
 ```
+
+**Switching clusters — use the launcher.** `runs/submit_full.sh` sets the
+scheduler flags (`--partition/--time/--cpus-per-task/--mem`) *and* the workload
+knobs from one set of env vars, so the same run goes to either cluster with no
+edits (and the core count stays in sync with `--cpus-per-task`):
+```bash
+# small cluster default_queue (32 cores, 4h, trimmed) — the defaults:
+code/runs/submit_full.sh
+# Bouchet 'day' (64-core nodes, 1-day limit, full workload):
+PARTITION=day CORES=64 WALLTIME=1-00:00:00 \
+  N_SIM=25000 N_SOBOL=50000 KEEP_BEST=480 MAXITER=1500 \
+  code/runs/submit_full.sh
+# extra sbatch flags pass through, e.g. an account:
+PARTITION=day CORES=64 WALLTIME=1-00:00:00 code/runs/submit_full.sh -A mygroup
+```
+Overridable env vars: `PARTITION CORES WALLTIME MEM N_SIM N_SOBOL KEEP_BEST
+MAXITER SEED SOBOL_SEED` (plus `CONDA_MODULE`, `ENV_NAME` from `setup_env`).
+
 Requires the moment `.dat` files in `data/intermediate/` (see `data/README.md`);
 `runs/hpc_21param_smoke.sh` is a 4-core mini version that fits the same real
 moments to confirm the pipeline + data path before a full run. To do a
@@ -359,8 +377,12 @@ responsibility):
   intra-node scaling sweep and its fast sanity variant (shared body).
 
 **`code/runs/` — estimation run configs:**
-- `hpc_full_21param.sh` — the full 21-parameter solve + result plots. (Sources
-  `setup_env` from `../benchmarking/_scaling_lib.sh`.)
+- `hpc_full_21param.sh` — the full 21-parameter solve + result plots (env-
+  overridable knobs; sources `setup_env` from `../benchmarking/_scaling_lib.sh`).
+- `submit_full.sh` — login-node launcher that turns env vars into matching
+  `sbatch` flags, so the full run goes to any cluster with no edits.
+- `hpc_21param_smoke.sh` — 4-core mini version to confirm the pipeline + data
+  path before committing real compute.
 
 Reused, validated economics core from `../earning_dynamics/code/msm_optimizer.py`.
 
