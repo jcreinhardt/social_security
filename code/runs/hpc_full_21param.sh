@@ -5,7 +5,8 @@
 #SBATCH --ntasks=1                # one launcher task; it spawns the workers
 #SBATCH --cpus-per-task=32        # match to a node with >= this many cores (this cluster: 32)
 #SBATCH --exclusive
-#SBATCH --time=04:00:00           # the full 21-param solve is heavy; adjust to your QOS MaxWall
+#SBATCH --partition=cpunormal     # no wall-time cap (default_queue caps at 4h); 32-core nodes
+#SBATCH --time=24:00:00           # the full 21-param solve is heavy; generous cap on cpunormal
 #SBATCH --mem=48G                 # ~32 workers x ~0.45 GB at n_sim=25000 (mem_benchmark.py)
 #SBATCH --output=tiktak_21param_%j.out
 # ---------------------------------------------------------------------------
