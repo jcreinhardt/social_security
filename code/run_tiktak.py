@@ -131,6 +131,7 @@ def run_one_worker(args):
             json.dump({
                 "free_names": prob.FREE_NAMES,
                 "truth": prob.FREE_TRUE.tolist(),
+                "free_bounds": prob.FREE_BOUNDS.tolist(),
                 "n_free": prob.N_FREE,
                 "config": {
                     "n_sim": cfg.n_sim, "n_sobol": cfg.sobol_draws,

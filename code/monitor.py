@@ -3,13 +3,17 @@ monitor.py
 ==========
 Read-only progress snapshot of a running (or finished) TikTak run: which phase
 it's in, how far the Sobol and local stages have got, and where the current
-best parameters stand vs. their Guvenen values. Safe to run anytime against the
-shared work directory while the job optimizes -- it never writes and only reads
-the small coordination files (not the tens-of-thousands of Sobol result files).
+best parameters stand vs. their Guvenen values.
+
+Pure standard library on purpose -- no numpy, no project imports -- so it runs
+with the plain system ``python`` on the cluster WITHOUT activating the conda
+env. Safe to run anytime against the shared work directory while a job
+optimizes: it only reads the small coordination files (counters, run_meta.json,
+local/*.json), never the tens-of-thousands of Sobol result files.
 
 Usage:
-    python monitor.py <workdir>            # one-shot snapshot
-    watch -n 30 python code/monitor.py <workdir>   # refresh every 30s
+    python code/monitor.py <workdir>                  # one-shot snapshot
+    watch -n 30 python code/monitor.py <workdir>      # refresh every 30s
 """
 
 import argparse
@@ -17,16 +21,6 @@ import glob
 import json
 import os
 import time
-
-import numpy as np
-
-# Make ./algorithm importable (entry points stay flat at code/; the library
-# modules live in code/algorithm/). Must precede the library import below.
-import os as _os
-import sys as _sys
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "algorithm"))
-
-from msm_model import PARAM_NAMES, PARAM_BOUNDS, THETA_TRUE
 
 
 def _read_int(path):
@@ -45,22 +39,15 @@ def _read_json(path):
         return None
 
 
-def current_best(workdir):
-    """Best (x, f, source) so far: the best Sobol start (once selected) improved
-    on by any finished local search. Cheap -- reads x_starts + local/*.json
-    only, never the full Sobol dump."""
-    best_x, best_f, src = None, np.inf, None
-    sp = os.path.join(workdir, "x_starts.npy")
-    sv = os.path.join(workdir, "x_starts_vals.npy")
-    if os.path.exists(sp) and os.path.exists(sv):
-        xs, vs = np.load(sp), np.load(sv)
-        if len(vs):
-            best_x, best_f, src = xs[0], float(vs[0]), "sobol"
+def _best_local(workdir):
+    """Best (x, f) among finished local searches; None if none yet. Reads only
+    the per-restart JSON files (<= keep_best of them)."""
+    best = None
     for p in glob.glob(os.path.join(workdir, "local", "*.json")):
         r = _read_json(p)
-        if r and r["f"] < best_f:
-            best_x, best_f, src = np.array(r["x"], float), float(r["f"]), "local"
-    return best_x, best_f, src
+        if r and (best is None or r["f"] < best[1]):
+            best = (r["x"], r["f"])
+    return best
 
 
 def main():
@@ -75,11 +62,8 @@ def main():
               f"(Is the path right?)")
         return
     free = meta["free_names"]
-    truth = np.array(meta["truth"], float)
-    idxs = [PARAM_NAMES.index(n) for n in free]
-    lo = PARAM_BOUNDS[idxs, 0]
-    hi = PARAM_BOUNDS[idxs, 1]
-    span = np.where(hi > lo, hi - lo, 1.0)
+    truth = meta["truth"]
+    bounds = meta.get("free_bounds")   # may be absent for older runs
 
     state = "?"
     try:
@@ -98,28 +82,37 @@ def main():
     print(f"phase: {state}   |   {len(free)} free parameters")
     if n_sobol:
         c = min(sob_claim, n_sobol) if sob_claim is not None else 0
-        print(f"Sobol screen : {c}/{n_sobol} claimed "
-              f"({100.0 * c / n_sobol:.0f}%)")
+        print(f"Sobol screen : {c}/{n_sobol} claimed ({100.0 * c / n_sobol:.0f}%)")
     if n_starts:
         print(f"Local search : {loc_done}/{n_starts} restarts finished "
               f"({100.0 * loc_done / n_starts:.0f}%)")
 
-    best_x, best_f, src = current_best(wd)
-    if best_x is None:
-        print("\nNo best point yet (still screening Sobol points).")
+    best = _best_local(wd)
+    if best is None:
+        print("\nNo completed local search yet (still screening / first wave).")
         return
+    x, f = best
 
-    print(f"\ncurrent best objective: {best_f:.6e}   (from {src})")
+    print(f"\ncurrent best objective: {f:.6e}")
     print(f"\n{'param':12s} {'current':>13s} {'Guvenen':>13s} "
           f"{'diff':>12s} {'%range':>8s}")
     print("-" * 62)
-    norm_err = np.abs(best_x - truth) / span
+    worst = (-1.0, "")
     for j, name in enumerate(free):
-        print(f"{name:12s} {best_x[j]:13.6f} {truth[j]:13.6f} "
-              f"{best_x[j] - truth[j]:+12.5f} {100 * norm_err[j]:7.1f}%")
+        diff = x[j] - truth[j]
+        if bounds:
+            lo, hi = bounds[j]
+            span = (hi - lo) if hi > lo else 1.0
+            pct = 100.0 * abs(diff) / span
+            pct_s = f"{pct:7.1f}%"
+            if pct > worst[0]:
+                worst = (pct, name)
+        else:
+            pct_s = "      ?"
+        print(f"{name:12s} {x[j]:13.6f} {truth[j]:13.6f} {diff:+12.5f} {pct_s}")
     print("-" * 62)
-    print(f"max |error| over bound range: {100 * norm_err.max():.1f}%   "
-          f"(param {free[int(norm_err.argmax())]})")
+    if bounds:
+        print(f"max |error| over bound range: {worst[0]:.1f}%   (param {worst[1]})")
 
 
 if __name__ == "__main__":
