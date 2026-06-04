@@ -364,6 +364,22 @@ responsibility):
 
 Reused, validated economics core from `../earning_dynamics/code/msm_optimizer.py`.
 
+## 8. Running on a different cluster
+The **only** cluster-specific module the scripts load is the conda/anaconda
+module — all Python dependencies come from the conda env (`environment.yml`).
+`setup_env` (`benchmarking/_scaling_lib.sh`) `module purge`s, then tries a list
+of known conda-module names and loads the first that provides `conda`, so the
+same scripts run on multiple clusters with no edit. The default list covers
+Yale Bouchet (`miniconda/24.11.3`) and the second cluster
+(`anaconda3/2023.09-0-k3at`). To force a specific module, set `CONDA_MODULE`:
+```bash
+sbatch --export=ALL,CONDA_MODULE=anaconda3/2023.09-0-k3at code/runs/hpc_full_21param.sh
+```
+If the conda env doesn't exist yet on the new cluster, `setup_env` builds it from
+`environment.yml`; if that solve fails (the file is a macOS export), create a
+slim env once — `conda create -n socsec_mac python=3.11 numpy scipy pandas numba
+matplotlib pytest` — and it'll be reused. Override the env name with `ENV_NAME`.
+
 ## 7. Tests
 A pytest suite under `code/tests/` guards the invariants we relied on during
 development. Run from `code/` (needs `pytest`, pinned in `../environment.yml`):

@@ -19,13 +19,23 @@ setup_env() {
     echo "Repo root: $ROOT"
     echo "Node: $(hostname)   logical CPUs: $(nproc)"
 
-    # Make conda available. On Yale's Bouchet cluster that's the miniconda
-    # module; change/remove this for a different cluster. `module purge` first
-    # to drop anything auto-loaded by the login shell (e.g. a `Python` module)
-    # that conflicts with miniconda. (Lmod keeps sticky/base modules.)
+    # Make conda available. The conda/anaconda module is the ONLY
+    # cluster-specific module we need (everything else comes from the conda
+    # env). To support multiple clusters, try a list of known module names and
+    # load the first that actually provides `conda`; set CONDA_MODULE to force a
+    # specific one. `module purge` first drops anything the login shell
+    # auto-loaded (e.g. a `Python` module) that would conflict. (Lmod keeps
+    # sticky/base modules through a purge.)
+    #   Bouchet: miniconda/24.11.3   |   <other cluster>: anaconda3/2023.09-0-k3at
+    CONDA_MODULES="${CONDA_MODULE:-miniconda/24.11.3 anaconda3/2023.09-0-k3at miniconda anaconda3 anaconda}"
     if command -v module >/dev/null 2>&1; then
         module purge 2>/dev/null || true
-        module load miniconda/24.11.3
+        for _m in $CONDA_MODULES; do
+            if module load "$_m" 2>/dev/null && command -v conda >/dev/null 2>&1; then
+                echo "Loaded conda module: $_m"
+                break
+            fi
+        done
     fi
     if command -v conda >/dev/null 2>&1; then
         # Disable `nounset` for conda: its activate/deactivate hooks (e.g. the
