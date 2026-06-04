@@ -3,10 +3,10 @@
 #SBATCH --job-name=tiktak_21param
 #SBATCH --nodes=1
 #SBATCH --ntasks=1                # one launcher task; it spawns the workers
-#SBATCH --cpus-per-task=50        # match to a node with >= this many cores
+#SBATCH --cpus-per-task=32        # match to a node with >= this many cores (this cluster: 32)
 #SBATCH --exclusive
 #SBATCH --time=04:00:00           # the full 21-param solve is heavy; adjust to your QOS MaxWall
-#SBATCH --mem=48G                 # ~50 workers x ~0.45 GB at n_sim=25000 (mem_benchmark.py)
+#SBATCH --mem=48G                 # ~32 workers x ~0.45 GB at n_sim=25000 (mem_benchmark.py)
 #SBATCH --output=tiktak_21param_%j.out
 # ---------------------------------------------------------------------------
 # Full 21-parameter Guvenen income-process estimation on one node with 64
@@ -35,7 +35,7 @@ ROOT="${SLURM_SUBMIT_DIR:-$(pwd)}"
 ENV_NAME="${ENV_NAME:-socsec_mac}"
 
 # ---- knobs -----------------------------------------------------------------
-CORES=50
+CORES=32
 N_SIM=25000
 N_SOBOL=50000                     # Sobol screen (21-dim needs broad coverage)
 KEEP_BEST=480                     # local restarts; >= CORES so stage B uses all
