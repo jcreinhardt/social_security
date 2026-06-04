@@ -272,19 +272,24 @@ conda run -n socsec_mac python code/run_tiktak.py --spawn 8 --free all \
 ```
 
 ### Full 21-parameter run on an HPC + plots
-`hpc_full_21param.sh` solves all 21 parameters on one 96-core node against
-synthetic targets (so the known answer for each is its Guvenen value), then runs
+`hpc_full_21param.sh` solves all 21 parameters on one 64-core node fitting the
+**real Guvenen data moments** (`data/intermediate/*.dat`), then runs
 `plot_results.py` to produce two figures in the run dir:
-- `params_vs_guvenen.png` — the found minimum vs. the Guvenen value for every
-  parameter, as normalized positions within each parameter's search bounds.
+- `params_vs_guvenen.png` — the found minimum vs. the published Guvenen value
+  for every parameter, as normalized positions within each parameter's bounds.
 - `objective_slices.png` — a 1-D slice of the objective along each parameter
   (others held at the estimate), marking the estimate and the Guvenen value, so
   you can see how well each parameter is identified.
 ```bash
 sbatch code/runs/hpc_full_21param.sh
-# or regenerate plots from a finished run:
-python code/plot_results.py output/run_21param
+# or regenerate plots from a finished run (use the same target source):
+python code/plot_results.py output/run_21param --real-moments data
 ```
+Requires the moment `.dat` files in `data/intermediate/` (see `data/README.md`);
+`runs/hpc_21param_smoke.sh` is a 4-core mini version that fits the same real
+moments to confirm the pipeline + data path before a full run. To do a
+noise-free recovery check instead, drop the `--real-moments` flags (synthetic
+targets from `THETA_TRUE`).
 The defaults are a sensible first solve, not Guvenen's full budget (900k Sobol /
 2000 restarts) — scale `N_SOBOL`/`KEEP_BEST` up (and `--time`/`--mem`) for a more
 thorough global search. 21-D local searches are far more expensive than 2-D, so

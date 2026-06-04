@@ -11,10 +11,12 @@
 # #SBATCH --partition=devel
 # ---------------------------------------------------------------------------
 # MINI smoke test of the full 21-parameter run: confirms the pipeline starts on
-# the cluster and writes output, using a handful of points on 4 cores. This is
-# NOT an estimate -- the workload is far too small to recover anything. Use it
-# to verify env + module + numba + file coordination + result writing before
-# committing real compute to runs/hpc_full_21param.sh.
+# the cluster and writes output, using a handful of points on 4 cores. Fits the
+# REAL Guvenen moments (data/intermediate/*.dat) -- same path as the full run --
+# so it also catches a missing/misplaced data dir. NOT an estimate; the workload
+# is far too small to recover anything. Use it to verify env + module + numba +
+# file coordination + data loading + result writing before committing real
+# compute to runs/hpc_full_21param.sh.
 #
 #     sbatch code/runs/hpc_21param_smoke.sh
 #
@@ -36,13 +38,20 @@ MAXITER=100
 SEED=42
 SOBOL_SEED=999
 WORKDIR="output/run_21param_smoke"
+DATA="$ROOT/data"                 # real Guvenen moments in $DATA/intermediate/*.dat
 
 source "$ROOT/code/benchmarking/_scaling_lib.sh"
 setup_env
 
+if [ ! -f "$DATA/intermediate/var_lny.dat" ]; then
+    echo "ERROR: real moments not found in $DATA/intermediate/ (need the .dat files)." >&2
+    echo "Copy them there (see data/README.md) or edit DATA above." >&2
+    exit 1
+fi
+
 echo
-echo "21-param SMOKE test: cores=$CORES, n_sim=$N_SIM, n_sobol=$N_SOBOL, "
-echo "keep_best=$KEEP_BEST, maxiter=$MAXITER  ->  $WORKDIR"
+echo "21-param SMOKE test (REAL moments): cores=$CORES, n_sim=$N_SIM, "
+echo "n_sobol=$N_SOBOL, keep_best=$KEEP_BEST, maxiter=$MAXITER  ->  $WORKDIR"
 echo
 
 python code/run_tiktak.py \
@@ -54,11 +63,12 @@ python code/run_tiktak.py \
     --maxiter "$MAXITER" \
     --seed "$SEED" \
     --sobol-seed "$SOBOL_SEED" \
+    --real-moments "$DATA" \
     --workdir "$WORKDIR"
 
 echo
 echo "Producing figures (also exercises plot_results) ..."
-( cd code && python plot_results.py "$ROOT/$WORKDIR" )
+( cd code && python plot_results.py "$ROOT/$WORKDIR" --real-moments "$DATA" )
 
 # ---- confirm it actually wrote the key artifact ----------------------------
 echo
