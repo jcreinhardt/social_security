@@ -20,8 +20,11 @@ setup_env() {
     echo "Node: $(hostname)   logical CPUs: $(nproc)"
 
     # Make conda available. On Yale's Bouchet cluster that's the miniconda
-    # module; change/remove this for a different cluster.
+    # module; change/remove this for a different cluster. `module purge` first
+    # to drop anything auto-loaded by the login shell (e.g. a `Python` module)
+    # that conflicts with miniconda. (Lmod keeps sticky/base modules.)
     if command -v module >/dev/null 2>&1; then
+        module purge 2>/dev/null || true
         module load miniconda/24.11.3
     fi
     if command -v conda >/dev/null 2>&1; then
