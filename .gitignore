@@ -24,6 +24,11 @@ output/*
 !output/.gitkeep
 !data/README.md
 !output/README.md
+# Track the small (~44 KB) Guvenen moment targets so the run scripts have them
+# after a plain `git pull` (raw inputs like *.xls stay ignored).
+!data/intermediate/
+data/intermediate/*
+!data/intermediate/*.dat
 
 # macOS zip metadata
 __MACOSX/
