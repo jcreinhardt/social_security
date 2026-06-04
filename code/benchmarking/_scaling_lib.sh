@@ -25,9 +25,12 @@ setup_env() {
         module load miniconda/24.11.3
     fi
     if command -v conda >/dev/null 2>&1; then
-        # NB: scripts run without `set -u` (nounset) on purpose -- conda's
-        # activate/deactivate hooks (e.g. the gcc_linux-64 compiler package)
-        # reference unbound variables and would otherwise abort activation.
+        # Disable `nounset` for conda: its activate/deactivate hooks (e.g. the
+        # gcc_linux-64 compiler package's deactivate.d) reference unbound vars
+        # and abort activation under `set -u`. We must `set +u` explicitly here
+        # because the shell may have inherited -u from the login shell/.bashrc
+        # (a script-level `set -eo pipefail` does not clear an inherited -u).
+        set +u
         source "$(conda info --base)/etc/profile.d/conda.sh"
         if ! conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
             echo "Creating conda env '$ENV_NAME' from environment.yml ..."
