@@ -5,8 +5,8 @@
 #SBATCH --ntasks=1                # one launcher task; it spawns the workers
 #SBATCH --cpus-per-task=32        # match to a node with >= this many cores (this cluster: 32)
 #SBATCH --exclusive
-#SBATCH --partition=cpunormal     # no wall-time cap (default_queue caps at 4h); 32-core nodes
-#SBATCH --time=24:00:00           # the full 21-param solve is heavy; generous cap on cpunormal
+#SBATCH --partition=default_queue # usually idle here -> starts immediately; capped at 4h
+#SBATCH --time=04:00:00           # default_queue QOS MaxWall; workload below is sized to fit
 #SBATCH --mem=48G                 # ~32 workers x ~0.45 GB at n_sim=25000 (mem_benchmark.py)
 #SBATCH --output=tiktak_21param_%j.out
 # ---------------------------------------------------------------------------
@@ -35,12 +35,15 @@ set -eo pipefail   # not -u: conda's activate/deactivate hooks use unbound vars
 ROOT="${SLURM_SUBMIT_DIR:-$(pwd)}"
 ENV_NAME="${ENV_NAME:-socsec_mac}"
 
-# ---- knobs -----------------------------------------------------------------
+# ---- knobs (sized to finish within default_queue's 4h cap on 32 cores) -----
+# For a more thorough solve, move to a partition with no wall cap (e.g.
+# `sbatch --partition=cpunormal --time=24:00:00 ...`) and scale these back up
+# (e.g. N_SOBOL=50000, KEEP_BEST=480, MAXITER=1500, N_SIM=25000).
 CORES=32
-N_SIM=25000
-N_SOBOL=50000                     # Sobol screen (21-dim needs broad coverage)
-KEEP_BEST=480                     # local restarts; >= CORES so stage B uses all
-MAXITER=1500                      # 21-dim local searches need more iterations
+N_SIM=20000
+N_SOBOL=20000                     # Sobol screen (21-dim needs broad coverage)
+KEEP_BEST=96                      # local restarts; >= CORES so stage B uses all
+MAXITER=800                       # 21-dim local searches need more iterations
 SEED=42
 SOBOL_SEED=999
 WORKDIR="output/run_21param"
