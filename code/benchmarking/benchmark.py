@@ -20,7 +20,7 @@ _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 
 
 from msm_model import (
     MSMConfig, THETA_TRUE, simulate_income, calculate_moments,
-    flatten_moments, build_weight_and_psi, deviation_F,
+    flatten_moments, build_weight_and_psi, deviation_F, get_shocks,
 )
 import problem_2param as prob
 from tiktak import local_search
@@ -47,11 +47,17 @@ def main():
 
     print(f"n_sim={args.n_sim}, hmax={cfg.hmax}, reps={args.reps}\n")
 
-    # 1. simulate_income
-    t_sim = timeit(lambda: simulate_income(theta, cfg.n_sim, cfg.hmax, cfg.seed), args.reps)
+    # Frozen Common-Random-Number shocks, exactly as the objective uses them
+    # (drawn once, reused every eval) -- so the timings below reflect the real
+    # per-eval cost and don't include the one-off draw_shocks.
+    shocks = get_shocks(cfg.n_sim, cfg.hmax, cfg.seed)
+
+    # 1. simulate_income (frozen shocks)
+    t_sim = timeit(lambda: simulate_income(theta, cfg.n_sim, cfg.hmax, cfg.seed,
+                                           shocks=shocks), args.reps)
 
     # 2. calculate_moments (on a fixed panel)
-    ysim = simulate_income(theta, cfg.n_sim, cfg.hmax, cfg.seed)
+    ysim = simulate_income(theta, cfg.n_sim, cfg.hmax, cfg.seed, shocks=shocks)
     t_mom = timeit(lambda: calculate_moments(ysim), args.reps)
 
     # 3. full objective eval (sim + moments + deviation)
@@ -59,9 +65,9 @@ def main():
     w_diag, psi, _, _ = build_weight_and_psi(m_target, slices)
 
     def one_eval():
-        ys = simulate_income(theta, cfg.n_sim, cfg.hmax, cfg.seed)
+        ys = simulate_income(theta, cfg.n_sim, cfg.hmax, cfg.seed, shocks=shocks)
         d, _ = flatten_moments(calculate_moments(ys))
-        return float(np.sum(w_diag * (deviation_F(d, m_target, psi) ** 2)))
+        return float(np.sqrt(np.sum(w_diag * (deviation_F(d, m_target, psi) ** 2))))
 
     t_eval = timeit(one_eval, args.reps)
 
