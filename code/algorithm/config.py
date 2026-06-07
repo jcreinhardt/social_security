@@ -12,14 +12,21 @@ from dataclasses import dataclass
 class MSMConfig:
     """All tuning knobs for the estimation."""
 
-    n_sim: int = 50_000          # Number of simulated individuals
+    # Defaults below mirror Guvenen et al.'s estimation replication code
+    # (guvenen_2021_replication/.../Estimation/{OBJECTIVE,ESTIMATE}.f90).
+    n_sim: int = 100_000         # Simulated individuals. Guvenen: nsim=100000,
+                                 # nrun=1 (OBJECTIVE.f90:13-14)
     hmax: int = 36               # Ages 25-60
     seed: int = 42               # CRN seed for simulation
 
     # Stage A: Sobol screening
-    sobol_draws: int = 250_000   # Appendix D uses 250K
+    # Guvenen draws qr_ndraw=900000 Sobol points (ESTIMATE.f90:30). We round up
+    # to the next power of two (2^20 = 1,048,576) because scipy's Sobol sequence
+    # is only balanced at powers of two (a truncated draw loses that balance).
+    sobol_draws: int = 1_048_576
     sobol_seed: int = 999        # Sobol scramble seed (shared across workers)
-    keep_best: int = 1_000       # Keep top-K legitimate points for local stage
+    keep_best: int = 2_000       # Local-search starts. Guvenen: nstart=2000
+                                 # (ESTIMATE.f90:31)
 
     # Stage B: local optimization
     local_methods: tuple = ("Powell", "Nelder-Mead")
