@@ -28,12 +28,30 @@ def load_ir_dat(path):
     """
     Load ImpulseA_mean.dat -> (2, 8, 10, 6) array.
     Fortran layout: (2*8*23) rows x 6 cols. Keep the 10 shock bins that match
-    the simulation grid.
+    the simulation grid. Used only to give the flat moment vector a slot of the
+    right shape; the objective replaces this block with the interpolated-target
+    deviation built from the full 23-point grid (see load_ir_data_full).
     """
     raw = np.loadtxt(path)  # (368, 6)
     full = raw.reshape(2, 8, 23, 6)
     shock_map = [0, 1, 2, 4, 8, 14, 18, 20, 21, 22]
     return full[:, :, shock_map, :]
+
+
+def load_ir_data_full(data_path):
+    """
+    Load the FULL impulse-response data grid -> (2, 8, 23, 6).
+
+    Unlike load_ir_dat (which subsamples 10 change points for the flat moment
+    vector), this keeps all ``nirchg_data=23`` change points so the objective
+    can interpolate the data response curve to each bin's *simulated* change,
+    reproducing OBJECTIVE.f90's ``impulse`` subroutine. Layout per (age, income
+    bin): column 0 is the (ascending) data change grid, columns 1..5 the data
+    responses at lags 1..5.
+    """
+    intermediate = os.path.join(data_path, 'intermediate')
+    raw = np.loadtxt(os.path.join(intermediate, 'ImpulseA_mean.dat'))  # (368, 6)
+    return raw.reshape(2, 8, 23, 6)
 
 
 def load_target_moments(data_path):

@@ -65,10 +65,16 @@ Q(θ)   = sqrt( Σ_n  w_n · F_n(θ)² )                  w = diagonal block wei
 Common Random Numbers (a fixed RNG seed) make `Q` deterministic in `θ`, so the
 optimizer sees a smooth surface rather than simulation noise.
 
-> One remaining difference from the Fortran is in *moment construction*, not the
-> objective: Guvenen interpolates the data impulse response to each bin's
-> simulated mean change, whereas `moments.py` compares responses on a fixed
-> change-percentile grid.
+**Impulse-response block (`objective.py: impulse_response_F`).** Faithful to the
+Fortran `impulse` subroutine: rather than comparing responses on a fixed
+change-percentile grid, the full 23-point *data* response curve
+(`targets.load_ir_data_full`) is **interpolated to each bin's simulated change**
+`irm[i,j,k,0]` (piecewise-linear, with endpoint extrapolation), and the
+simulated responses are compared against that — so model and data are matched at
+the *same shock magnitude*, not the same percentile. The change column itself is
+the interpolation abscissa, not a targeted moment (weight 0). This applies to
+real-data targets; synthetic targets stay on the simulation grid for exact
+recovery.
 
 ---
 

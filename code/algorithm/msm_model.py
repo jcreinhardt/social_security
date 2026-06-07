@@ -21,10 +21,12 @@ from moments import (
 )
 from objective import (
     project_to_bounds, make_diagonal_weights, compute_psi, deviation_F,
-    build_weight_and_psi, msm_objective,
+    build_weight_and_psi, msm_objective, GUV_SCALE,
+    interp_impulse_targets, impulse_response_F,
 )
 from targets import (
-    load_ssk_dat, load_ir_dat, load_target_moments, synthetic_target_moments,
+    load_ssk_dat, load_ir_dat, load_ir_data_full, load_target_moments,
+    synthetic_target_moments,
 )
 
 __all__ = [
@@ -36,7 +38,8 @@ __all__ = [
     "VASEINCPCT", "IRAVGINCPCT", "IRCHGPCT", "LTINCPCT", "NAGEBIN", "AGEBINL",
     "DF1", "DF2",
     "project_to_bounds", "make_diagonal_weights", "compute_psi", "deviation_F",
-    "build_weight_and_psi", "msm_objective",
-    "load_ssk_dat", "load_ir_dat", "load_target_moments",
+    "build_weight_and_psi", "msm_objective", "GUV_SCALE",
+    "interp_impulse_targets", "impulse_response_F",
+    "load_ssk_dat", "load_ir_dat", "load_ir_data_full", "load_target_moments",
     "synthetic_target_moments",
 ]

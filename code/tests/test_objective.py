@@ -8,7 +8,8 @@ sqrt-of-weighted-SSQ aggregation.
 
 import numpy as np
 
-from objective import build_weight_and_psi, deviation_F, GUV_SCALE
+from objective import (build_weight_and_psi, deviation_F, GUV_SCALE,
+                       interp_impulse_targets, impulse_response_F)
 
 
 def _toy_slices():
@@ -73,6 +74,35 @@ def test_deviation_is_symmetric_percentage_with_zero_guard():
     F = deviation_F(d, m, psi)
     assert abs(F[0] - (1.0 / 1.5)) < 1e-12     # (2-1)/(0.5*(2+1)+0)
     assert np.isfinite(F[1]) and F[1] == 0.0   # 0/0 floored, not NaN
+
+
+def _toy_ir():
+    """One (age, income) cell with change grid [0,1,2] and two response lags."""
+    ir = np.zeros((1, 1, 3, 3))
+    ir[0, 0, :, 0] = [0.0, 1.0, 2.0]      # data change points
+    ir[0, 0, :, 1] = [10.0, 20.0, 30.0]   # lag-1 data response
+    ir[0, 0, :, 2] = [0.0, 5.0, 10.0]     # lag-2 data response
+    return ir
+
+
+def test_impulse_interpolation_on_grid_interior_and_extrapolated():
+    ir = _toy_ir()
+    d = np.zeros((1, 1, 3, 3))
+    d[0, 0, :, 0] = [1.0, 0.5, 2.5]       # on a grid point / interior / above grid
+    targ = interp_impulse_targets(d, ir)
+    assert np.allclose(targ[0, 0, 0], [20.0, 5.0])    # exact at grid point x=1
+    assert np.allclose(targ[0, 0, 1], [15.0, 2.5])    # linear interior x=0.5
+    assert np.allclose(targ[0, 0, 2], [35.0, 12.5])   # extrapolated above x=2.5
+
+
+def test_impulse_F_zeros_change_column_and_vanishes_when_matched():
+    ir = _toy_ir()
+    d = np.zeros((1, 1, 2, 3))
+    d[0, 0, :, 0] = [0.5, 1.5]
+    d[0, 0, :, 1:] = interp_impulse_targets(d, ir)   # sim responses == interp target
+    F = impulse_response_F(d, ir)
+    assert np.all(F[..., 0] == 0.0)        # change column is the abscissa, not targeted
+    assert np.allclose(F[..., 1:], 0.0)    # zero deviation when sim matches the curve
 
 
 def test_objective_is_zero_at_truth_under_crn(cfg_small):

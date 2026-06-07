@@ -139,11 +139,66 @@ def build_weight_and_psi(m_target, slices):
     return w, psi, None, None
 
 
+def interp_impulse_targets(d_irm, ir_data):
+    """Interpolate the data impulse-response curve to each bin's SIMULATED
+    change, reproducing OBJECTIVE.f90's ``impulse`` subroutine: piecewise-linear
+    in the data change grid, with endpoint *extrapolation* (the Fortran
+    ``LOCATE`` result is clamped to an interior segment, so a simulated change
+    outside the data grid is linearly extended from the nearest segment).
+
+    d_irm:   simulated irmoments, (n_i, n_j, n_k, NLAG+1); ``[...,0]`` is the
+             simulated mean change in each bin, ``[...,1:]`` the simulated
+             responses.
+    ir_data: data grid, (n_i, n_j, n_data, NLAG+1); ``[...,0]`` the ascending
+             data change points, ``[...,1:]`` the data responses.
+    Returns: targ, (n_i, n_j, n_k, NLAG) -- the data response interpolated to
+             each simulated change.
+    """
+    n_i, n_j, n_k, ncol = d_irm.shape
+    n_data = ir_data.shape[2]
+    targ = np.empty((n_i, n_j, n_k, ncol - 1))
+    for i in range(n_i):
+        for j in range(n_j):
+            xg = ir_data[i, j, :, 0]
+            yg = ir_data[i, j, :, 1:]                 # (n_data, NLAG)
+            x = d_irm[i, j, :, 0]                      # (n_k,)
+            # left bracket index, clamped to an interior segment (Fortran LOCATE
+            # clamp) so out-of-grid changes extrapolate rather than saturate.
+            lo = np.clip(np.searchsorted(xg, x, side="right") - 1, 0, n_data - 2)
+            x0, x1 = xg[lo], xg[lo + 1]
+            sx = (x - x0) / (x1 - x0)                  # may be <0 or >1 (extrapolation)
+            y0, y1 = yg[lo], yg[lo + 1]                # (n_k, NLAG) each
+            targ[i, j] = y0 + (y1 - y0) * sx[:, None]
+    return targ
+
+
+def impulse_response_F(d_irm, ir_data, scale=None):
+    """Deviation array for the impulse-response block with the data response
+    interpolated to the simulated change (Guvenen's method). Shaped like
+    ``d_irm`` (n_i,n_j,n_k,NLAG+1): the change column (index 0) is 0 (it is the
+    interpolation abscissa, not a targeted moment); the response columns are the
+    symmetric percentage error ``(targ - sim)/(0.5(|targ|+|sim|) + scale)``."""
+    if scale is None:
+        scale = GUV_SCALE["irmoments"]
+    targ = interp_impulse_targets(d_irm, ir_data)      # (..., NLAG)
+    sim = d_irm[..., 1:]
+    denom = 0.5 * (np.abs(targ) + np.abs(sim)) + scale
+    denom = np.where(denom > 0.0, denom, 1e-12)
+    F = np.zeros_like(d_irm)
+    F[..., 1:] = (targ - sim) / denom
+    return F
+
+
 def msm_objective(theta, m_target, w_diag, psi, cfg):
     """
     The MSM objective Q(theta) = sqrt( sum_n w_n F_n(theta)^2 ), with Common
     Random Numbers (fixed seed). Returns a large penalty on any numerical
     failure.
+
+    NOTE: this convenience form uses the *static* impulse-response target baked
+    into ``m_target``. The faithful interpolated-impulse path (Guvenen's
+    ``impulse`` subroutine) lives in ``Problem.make_objective``, which is what
+    the run/plot pipeline uses.
     """
     try:
         theta = project_to_bounds(theta, PARAM_BOUNDS)

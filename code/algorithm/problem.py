@@ -20,7 +20,7 @@ from msm_model import (
     PARAM_NAMES, PARAM_BOUNDS, THETA_TRUE,
     simulate_income, calculate_moments, flatten_moments,
     build_weight_and_psi, deviation_F, synthetic_target_moments,
-    load_target_moments, get_shocks,
+    load_target_moments, load_ir_data_full, impulse_response_F, get_shocks,
 )
 
 ALL = "all"
@@ -58,21 +58,30 @@ class Problem:
         return theta
 
     def build_target(self, cfg, real_data_path=None):
+        """Returns (m_target, slices, w_diag, psi, ir_data). ``ir_data`` is the
+        full 23-point impulse-response data grid for real-data targets (used to
+        interpolate the impulse target to the simulated change, Guvenen-style),
+        or None for synthetic targets (which are themselves on the simulation
+        grid, so the impulse block uses the static target for exact recovery)."""
         if real_data_path is not None:
             m_target, slices = load_target_moments(real_data_path)
+            ir_data = load_ir_data_full(real_data_path)
         else:
             m_target, slices = synthetic_target_moments(cfg)
+            ir_data = None
         w_diag, psi, _, _ = build_weight_and_psi(m_target, slices)
-        return m_target, slices, w_diag, psi
+        return m_target, slices, w_diag, psi, ir_data
 
     def make_objective(self, cfg, real_data_path=None):
         """Return ``f(x_free) -> float``, the MSM objective over the free
         parameters. Frozen CRN shocks and the target are built once and
         captured."""
-        m_target, slices, w_diag, psi = self.build_target(cfg, real_data_path)
+        m_target, slices, w_diag, psi, ir_data = self.build_target(
+            cfg, real_data_path)
         shocks = get_shocks(cfg.n_sim, cfg.hmax, cfg.seed)
         idxs = self.FREE_IDXS
         bounds = self.FREE_BOUNDS
+        ir_slice = slices.get("irmoments")
 
         def objective(x):
             try:
@@ -81,10 +90,17 @@ class Problem:
                     theta[idx] = min(max(float(x[j]), bounds[j, 0]), bounds[j, 1])
                 ysim = simulate_income(theta, cfg.n_sim, cfg.hmax, cfg.seed,
                                        shocks=shocks)
-                d, _ = flatten_moments(calculate_moments(ysim))
+                mom = calculate_moments(ysim)
+                d, _ = flatten_moments(mom)
                 if d.shape != m_target.shape:
                     return 1e20
                 F = deviation_F(d, m_target, psi)
+                # Impulse block: replace the static-target deviation with the
+                # data response interpolated to the simulated change (Guvenen's
+                # `impulse` subroutine). Real-data targets only.
+                if ir_data is not None and ir_slice is not None:
+                    s, e = ir_slice
+                    F[s:e] = impulse_response_F(mom["irmoments"], ir_data).ravel()
                 return float(np.sqrt(np.sum(w_diag * (F ** 2))))
             except Exception:
                 return 1e20
