@@ -85,7 +85,7 @@ class Problem:
                 if d.shape != m_target.shape:
                     return 1e20
                 F = deviation_F(d, m_target, psi)
-                return float(np.sum(w_diag * (F ** 2)))
+                return float(np.sqrt(np.sum(w_diag * (F ** 2))))
             except Exception:
                 return 1e20
 

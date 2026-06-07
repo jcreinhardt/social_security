@@ -44,16 +44,31 @@ with, across the **21 parameters**:
 (`irmoments`), lifetime-income growth (`incgrwth`), variance of log income by age
 (`var_lny`), and the employment CDF (`EmpCDF`).
 
-### The SMM objective (`msm_model.py: deviation_F`, `make_objective`)
-For simulated moments `d(θ)` and targets `m`,
+### The SMM objective (`objective.py: deviation_F`, `build_weight_and_psi`)
+A faithful port of Guvenen et al.'s `dfovec`/`OBJ_FUNC` (`OBJECTIVE.f90`). For
+simulated moments `d(θ)` and targets `m`,
 
 ```
-F_n(θ) = (d_n − m_n) / ( ½(|d_n| + |m_n|) + ψ_n )     ψ_n = 10th pct of |m| in group
-Q(θ)   = Σ_n  w_n · F_n(θ)²                           w = diagonal group weights
+F_n(θ) = (d_n − m_n) / ( ½(|d_n| + |m_n|) + ψ_n )    ψ_n = fixed per-block floor
+Q(θ)   = sqrt( Σ_n  w_n · F_n(θ)² )                  w = diagonal block weights
 ```
+- **ψ (scale floor)** is Guvenen's fixed `scale_moments` per block —
+  `0.05` (Sd/Skew/Kurt L1, L5), `0.0403` (impulse responses), `0` (income
+  growth, var(log y), EmpCDF) — not data-driven.
+- **w (block weights)** give each moment block an equal share of the objective:
+  seven equal sevenths, with Sd/Skew/Kurt (L1+L5) and the impulse responses
+  (short lags 1–3, long lags 4–5) each getting `2/7`, divided within a block by
+  its moment count. Non-targeted entries are zeroed: the impulse *change*
+  columns (the interpolation x) and the final EmpCDF point (a forced 100).
+- **`sqrt`** of the weighted sum of squares matches `OBJ_FUNC`.
 
 Common Random Numbers (a fixed RNG seed) make `Q` deterministic in `θ`, so the
 optimizer sees a smooth surface rather than simulation noise.
+
+> One remaining difference from the Fortran is in *moment construction*, not the
+> objective: Guvenen interpolates the data impulse response to each bin's
+> simulated mean change, whereas `moments.py` compares responses on a fixed
+> change-percentile grid.
 
 ---
 
