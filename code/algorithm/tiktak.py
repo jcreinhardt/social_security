@@ -35,6 +35,9 @@ import fcntl
 import glob
 import json
 import os
+import random
+import signal
+import socket
 import time
 
 import numpy as np
@@ -49,8 +52,36 @@ LOCAL_SEARCH = "LOCAL_SEARCH"
 POLISH = "POLISH"
 DONE = "DONE"
 
-POLL_SLEEP = 0.3       # seconds between polls while waiting
-DEFAULT_TIMEOUT = 3600  # safety cap on any wait loop
+POLL_SLEEP = 0.3                 # seconds between polls while waiting
+# State transitions (SELECT/POLISH) happen within seconds once their stage is
+# complete, so a wait only stalls this long if the run is genuinely stuck. On a
+# preemptible (scavenge) run a stage can legitimately be paused for a long time
+# while every worker is preempted, so the real bound is the SLURM walltime, not
+# this cap. Keep it large enough never to fire spuriously.
+DEFAULT_TIMEOUT = 30 * 24 * 3600
+
+# Set by a SIGTERM/SIGUSR1 handler when SLURM signals an imminent preemption.
+# Worker loops poll this, drop their in-flight lease, and exit cleanly so the
+# task can be requeued and its work reclaimed by a survivor.
+_STOP = False
+
+
+def _install_signal_handlers():
+    """Best-effort: flip the global stop flag on the signals SLURM uses to warn
+    of preemption/cancellation. Safe to call from any process; no-op if the
+    runtime forbids setting handlers (e.g. not the main thread)."""
+    def _handler(signum, frame):
+        global _STOP
+        _STOP = True
+    for sig in (signal.SIGTERM, signal.SIGUSR1):
+        try:
+            signal.signal(sig, _handler)
+        except (ValueError, OSError):
+            pass
+
+
+def stop_requested():
+    return _STOP
 
 
 class Locked:
@@ -89,7 +120,16 @@ class FileCoordinator:
         self.workdir = os.path.abspath(workdir)
         self.sobol_dir = os.path.join(self.workdir, "sobol")
         self.local_dir = os.path.join(self.workdir, "local")
-        for d in (self.workdir, self.sobol_dir, self.local_dir):
+        # Lease directories (preemption recovery): a worker drops a lease file
+        # while a task is in flight; a stale lease (or none) marks the task as
+        # reclaimable by a survivor. Keyed by stage name.
+        self.claims_dir = {
+            "sobol": os.path.join(self.workdir, "sobol_claims"),
+            "local": os.path.join(self.workdir, "local_claims"),
+        }
+        self.results_dir = {"sobol": self.sobol_dir, "local": self.local_dir}
+        for d in (self.workdir, self.sobol_dir, self.local_dir,
+                  *self.claims_dir.values()):
             os.makedirs(d, exist_ok=True)
 
     # -- paths ------------------------------------------------------------
@@ -203,6 +243,73 @@ class FileCoordinator:
                 best = (np.array(r["x"], float), r["f"])
         return best
 
+    # -- leases (preemption recovery) ------------------------------------
+    def _lease_path(self, stage, idx):
+        return os.path.join(self.claims_dir[stage], f"{idx:08d}.json")
+
+    def write_lease(self, stage, idx, wid):
+        """Drop/refresh the lease for (stage, idx): records who holds it and
+        when. Rewriting it (same args) is the heartbeat."""
+        self._write_json(self._lease_path(stage, idx),
+                         {"wid": wid, "host": socket.gethostname(),
+                          "pid": os.getpid(), "t": time.time()})
+
+    def touch_lease(self, stage, idx, wid):
+        """Best-effort heartbeat: refresh the lease timestamp so a live-but-slow
+        worker is never reclaimed mid-task. Swallows transient FS errors."""
+        try:
+            self.write_lease(stage, idx, wid)
+        except OSError:
+            pass
+
+    def drop_lease(self, stage, idx):
+        try:
+            os.remove(self._lease_path(stage, idx))
+        except OSError:
+            pass
+
+    def result_exists(self, stage, idx):
+        return os.path.exists(
+            os.path.join(self.results_dir[stage], f"{idx:08d}.json"))
+
+    def lease_is_stale(self, stage, idx, ttl):
+        """True if (stage, idx) has no lease or its lease is older than ttl."""
+        try:
+            with open(self._lease_path(stage, idx)) as fh:
+                rec = json.load(fh)
+            return (time.time() - float(rec["t"])) > ttl
+        except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError):
+            return True
+
+    def try_reclaim(self, stage, idx, wid, ttl):
+        """Atomically claim an abandoned task. Under a per-index lock, re-check
+        that it is still unfinished AND its lease is stale, then take the lease.
+        Serializing the decision keeps two survivors from both grabbing the same
+        straggler (a rare double is harmless: results are atomic, last wins)."""
+        lock = os.path.join(self.claims_dir[stage], f"{idx:08d}.lock")
+        with Locked(lock):
+            if self.result_exists(stage, idx):
+                return False
+            if not self.lease_is_stale(stage, idx, ttl):
+                return False
+            self.write_lease(stage, idx, wid)
+            return True
+
+    def next_missing(self, stage, n, ttl):
+        """First reclaimable index in [0, n): no result yet and lease stale.
+        Scan starts at a random offset so survivors spread over different
+        stragglers rather than all racing for index 0. None if none."""
+        if n <= 0:
+            return None
+        start = random.randrange(n)
+        for off in range(n):
+            idx = (start + off) % n
+            if self.result_exists(stage, idx):
+                continue
+            if self.lease_is_stale(stage, idx, ttl):
+                return idx
+        return None
+
     def wait_until(self, predicate, timeout=DEFAULT_TIMEOUT):
         t0 = time.time()
         while not predicate():
@@ -223,15 +330,24 @@ def _bound_penalty(x, lo, hi, weight):
     return weight * float(np.sum(below ** 2 + above ** 2))
 
 
-def local_search(objective, x_start, bounds, cfg, maxiter=None):
+def local_search(objective, x_start, bounds, cfg, maxiter=None, on_step=None):
     """Run a chain of local optimizers from ``x_start``; return (best_x,
     best_f). Powell is tried with native bounds, others via a smooth penalty
     (the pattern from earning_dynamics/4_parameter_test.py:_run_restart).
     ``maxiter`` overrides ``cfg.maxiter_local`` for this restart (used to give
-    exploit-heavy restarts a smaller budget)."""
+    exploit-heavy restarts a smaller budget). ``on_step`` (if given) is invoked
+    once per optimizer iteration -- used to refresh the task lease so a long
+    restart on a preemptible node is not mistaken for a dead one."""
     lo, hi = bounds[:, 0], bounds[:, 1]
     bounds_list = [tuple(b) for b in bounds]
     mi = cfg.maxiter_local if maxiter is None else int(maxiter)
+
+    def _cb(*_a, **_k):
+        if on_step is not None:
+            try:
+                on_step()
+            except Exception:
+                pass
 
     def clipped_obj(x):
         return objective(np.clip(np.atleast_1d(x), lo, hi))
@@ -249,13 +365,15 @@ def local_search(objective, x_start, bounds, cfg, maxiter=None):
             if method == "Powell":
                 try:
                     res = minimize(clipped_obj, x0=x_curr, method="Powell",
-                                   bounds=bounds_list,
+                                   bounds=bounds_list, callback=_cb,
                                    options={"maxiter": mi, "disp": False})
                 except TypeError:
                     res = minimize(penalized_obj, x0=x_curr, method="Powell",
+                                   callback=_cb,
                                    options={"maxiter": mi, "disp": False})
             else:
                 res = minimize(penalized_obj, x0=x_curr, method=method,
+                               callback=_cb,
                                options={"maxiter": mi, "disp": False})
             cand_x = np.clip(np.atleast_1d(res.x), lo, hi)
             cand_f = clipped_obj(cand_x)
@@ -294,20 +412,40 @@ def _try_become_leader(coord, objective, bounds, cfg):
         return True
 
 
-def _stage_eval_sobol(coord, objective, wid):
+def _stage_eval_sobol(coord, objective, cfg, wid):
     sobol_points = np.load(coord._p("sobol_points.npy"))
     n_sobol = coord.read_meta_int("n_sobol")
-    n_done_local = 0
-    while True:
+    n_done = 0
+
+    def _eval(i):
+        f = objective(sobol_points[i])
+        coord.write_sobol_result(i, sobol_points[i], f)
+        coord.drop_lease("sobol", i)
+
+    # Phase 1: hand out fresh indices via the monotonic counter (low contention).
+    while not _STOP:
         i = coord.claim_next("sobol_counter")
         if i >= n_sobol:
             break
-        f = objective(sobol_points[i])
-        coord.write_sobol_result(i, sobol_points[i], f)
-        n_done_local += 1
-    print(f"[worker {wid}] evaluated {n_done_local} Sobol points", flush=True)
-    # wait for the whole set to be finished by all workers
-    coord.wait_until(lambda: coord.count_sobol_results() >= n_sobol)
+        coord.write_lease("sobol", i, wid)
+        _eval(i)
+        n_done += 1
+
+    # Phase 2: reaper. The counter is exhausted but some results may be missing
+    # because their worker was preempted in flight. Re-do them until the whole
+    # set is complete. Completion is defined by result files, not the counter,
+    # so this can never hang on a dropped task.
+    while not _STOP and coord.count_sobol_results() < n_sobol:
+        if coord.get_state() == DONE:
+            return
+        i = coord.next_missing("sobol", n_sobol, cfg.lease_ttl)
+        if i is None or not coord.try_reclaim("sobol", i, wid, cfg.lease_ttl):
+            time.sleep(POLL_SLEEP)
+            continue
+        _eval(i)
+        n_done += 1
+
+    print(f"[worker {wid}] evaluated {n_done} Sobol points", flush=True)
 
 
 def _stage_select(coord, cfg, wid):
@@ -316,6 +454,9 @@ def _stage_select(coord, cfg, wid):
     with Locked(coord._p("select.lock")):
         if coord.get_state() != EVAL_SOBOL:
             return  # someone else already selected
+        if coord.count_sobol_results() < coord.read_meta_int("n_sobol"):
+            return  # Sobol screen not complete yet (safe for the coordinator
+            #         to poll-call this); selection must see the full set.
         recs = coord.load_sobol_results()
         x = np.array([r["x"] for r in recs], float)
         f = np.array([r["f"] for r in recs], float)
@@ -340,12 +481,9 @@ def _stage_local_search(coord, objective, bounds, cfg, wid):
     n_starts = coord.read_meta_int("n_starts")
     lo, hi = bounds[:, 0], bounds[:, 1]
     sobol_best = (starts[0].copy(), float(start_vals[0]))
-    n_done_local = 0
+    n_done = 0
 
-    while True:
-        k = coord.claim_next("local_counter")
-        if k >= n_starts:
-            break
+    def _run(k):
         # running global best (z_star): best completed local result, else
         # the best Sobol point.
         rb = coord.read_best()
@@ -362,13 +500,35 @@ def _stage_local_search(coord, objective, bounds, cfg, wid):
         # that already starts essentially at z_star needs little refinement.
         mi = int(round(cfg.maxiter_local
                        * (1.0 - (1.0 - cfg.maxiter_min_frac) * theta_k)))
-        best_x, best_f = local_search(objective, x_start, bounds, cfg,
-                                      maxiter=max(mi, 1))
+        best_x, best_f = local_search(
+            objective, x_start, bounds, cfg, maxiter=max(mi, 1),
+            on_step=lambda: coord.touch_lease("local", k, wid))
         coord.write_local_result(k, best_x, best_f)
-        n_done_local += 1
+        coord.drop_lease("local", k)
 
-    print(f"[worker {wid}] ran {n_done_local} local searches", flush=True)
-    coord.wait_until(lambda: coord.count_local_results() >= n_starts)
+    # Phase 1: hand out fresh restart indices via the monotonic counter.
+    while not _STOP:
+        k = coord.claim_next("local_counter")
+        if k >= n_starts:
+            break
+        coord.write_lease("local", k, wid)
+        _run(k)
+        n_done += 1
+
+    # Phase 2: reaper. Re-run any restart whose worker was preempted in flight,
+    # until every start has a result. Completion is by result files, not the
+    # counter, so a dropped restart can never stall the stage.
+    while not _STOP and coord.count_local_results() < n_starts:
+        if coord.get_state() == DONE:
+            return
+        k = coord.next_missing("local", n_starts, cfg.lease_ttl)
+        if k is None or not coord.try_reclaim("local", k, wid, cfg.lease_ttl):
+            time.sleep(POLL_SLEEP)
+            continue
+        _run(k)
+        n_done += 1
+
+    print(f"[worker {wid}] ran {n_done} local searches", flush=True)
 
 
 def _stage_polish(coord, objective, bounds, cfg, wid):
@@ -377,6 +537,9 @@ def _stage_polish(coord, objective, bounds, cfg, wid):
     with Locked(coord._p("polish.lock")):
         if coord.get_state() != LOCAL_SEARCH:
             return
+        if coord.count_local_results() < coord.read_meta_int("n_starts"):
+            return  # local stage not complete yet (safe for the coordinator
+            #         to poll-call this); polish from the final global best.
         rb = coord.read_best()
         if rb is None:
             starts = np.load(coord._p("x_starts.npy"))
@@ -394,21 +557,43 @@ def _stage_polish(coord, objective, bounds, cfg, wid):
 # Worker entry point
 # ============================================================================
 
-def run_worker(coord, objective, bounds, cfg, wid=0):
+def wait_for_init(coord, timeout=DEFAULT_TIMEOUT):
+    """Block until the run is initialized (the ``initialized`` marker exists, so
+    sobol_points/state are committed) or the run is already DONE. Workers that
+    do not elect a leader use this to wait for the coordinator's init."""
+    t0 = time.time()
+    while not os.path.exists(coord._p("initialized")):
+        if coord.get_state() == DONE:
+            return
+        if time.time() - t0 > timeout:
+            raise TimeoutError("wait_for_init timed out (no coordinator?)")
+        time.sleep(POLL_SLEEP)
+
+
+def run_worker(coord, objective, bounds, cfg, wid=0, elect=True):
     """Run one TikTak worker process to completion against the shared run
     directory ``coord``. ``objective(x)`` is the scalar objective over the free
-    parameters; ``bounds`` is a (d,2) array."""
-    bounds = np.asarray(bounds, float)
+    parameters; ``bounds`` is a (d,2) array.
 
-    # 1. INIT (leader election)
-    if coord.get_state() is None:
+    ``elect``: if True this process may become the init leader when the run is
+    uninitialized (single-node ``--spawn`` and the coordinator). Scavenge array
+    workers pass ``elect=False`` and instead wait for the coordinator to init.
+    A worker that catches a preemption signal (``_STOP``) returns early, leaving
+    its in-flight task to be reclaimed by a survivor."""
+    bounds = np.asarray(bounds, float)
+    _install_signal_handlers()
+
+    # 1. INIT
+    if elect and coord.get_state() is None:
         _try_become_leader(coord, objective, bounds, cfg)
-    coord.wait_state({EVAL_SOBOL, SELECT_STARTS, LOCAL_SEARCH, POLISH, DONE})
+    wait_for_init(coord)
     if coord.get_state() == DONE:
         return
 
     # 2. EVAL_SOBOL
-    _stage_eval_sobol(coord, objective, wid)
+    _stage_eval_sobol(coord, objective, cfg, wid)
+    if _STOP:
+        return
 
     # 3. SELECT_STARTS (whoever gets the lock first does it)
     if coord.get_state() == EVAL_SOBOL:
@@ -419,6 +604,8 @@ def run_worker(coord, objective, bounds, cfg, wid=0):
 
     # 4. LOCAL_SEARCH
     _stage_local_search(coord, objective, bounds, cfg, wid)
+    if _STOP:
+        return
 
     # 5. POLISH (whoever gets the lock first does it)
     if coord.get_state() == LOCAL_SEARCH:

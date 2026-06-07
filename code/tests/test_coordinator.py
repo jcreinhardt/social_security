@@ -80,3 +80,42 @@ def test_meta_roundtrip(tmp_path):
     coord = FileCoordinator(str(tmp_path))
     coord.write_meta("n_sobol", 1234)
     assert coord.read_meta_int("n_sobol") == 1234
+
+
+def test_lease_staleness_and_reclaim(tmp_path):
+    """Preemption recovery primitive: a fresh lease is held; a lease past its
+    TTL is reclaimable; a completed task is never reclaimable."""
+    coord = FileCoordinator(str(tmp_path))
+    # No lease yet -> stale (reclaimable).
+    assert coord.lease_is_stale("local", 7, ttl=600)
+    # A just-written lease is fresh under a generous TTL, stale under ttl=0.
+    coord.write_lease("local", 7, wid=3)
+    assert not coord.lease_is_stale("local", 7, ttl=600)
+    assert coord.lease_is_stale("local", 7, ttl=0)
+    # try_reclaim honors the TTL: refuses a fresh lease, grants a stale one.
+    assert not coord.try_reclaim("local", 7, wid=9, ttl=600)
+    assert coord.try_reclaim("local", 7, wid=9, ttl=0)
+    # Once a result exists the task is done -> never reclaimable.
+    coord.write_local_result(7, [0.1, 0.2], 1.0)
+    assert not coord.try_reclaim("local", 7, wid=9, ttl=0)
+
+
+def test_next_missing_finds_only_unfinished_stale(tmp_path):
+    """next_missing returns an index that has no result and a stale (or absent)
+    lease; it skips completed and freshly-leased indices."""
+    coord = FileCoordinator(str(tmp_path))
+    n = 5
+    coord.write_local_result(0, [0.0], 1.0)   # done -> skip
+    coord.write_local_result(1, [0.0], 1.0)   # done -> skip
+    coord.write_lease("local", 2, wid=1)      # fresh lease -> skip under big TTL
+    # indices 3, 4 have neither result nor lease -> reclaimable
+    found = coord.next_missing("local", n, ttl=600)
+    assert found in (3, 4)
+    # With ttl=0 the fresh lease on 2 also counts as stale/reclaimable.
+    seen = {coord.next_missing("local", n, ttl=0) for _ in range(40)}
+    assert 0 not in seen and 1 not in seen   # completed never returned
+    assert {2, 3, 4} & seen                   # at least some unfinished returned
+    # When everything is finished, next_missing reports nothing to do.
+    for k in (2, 3, 4):
+        coord.write_local_result(k, [0.0], 1.0)
+    assert coord.next_missing("local", n, ttl=0) is None

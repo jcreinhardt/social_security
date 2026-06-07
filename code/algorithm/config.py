@@ -42,3 +42,13 @@ class MSMConfig:
     # Filtering / penalties
     max_legit_obj_val: float = 1e8
     penalty_weight: float = 1e6
+
+    # Fault tolerance (preemptible / scavenge runs). A task (Sobol point or
+    # local restart) whose lease has not been refreshed within lease_ttl seconds
+    # is presumed abandoned (its worker was preempted) and re-claimed by a
+    # survivor. Live workers refresh the lease via a per-iteration heartbeat, so
+    # this only needs to exceed the gap between heartbeats with margin.
+    lease_ttl: float = 600.0
+    # Coordinator babysitter cadence: how often the stable coordinator checks on
+    # the scavenge array (resubmit if drained) and drives stage transitions.
+    babysit_interval: float = 60.0

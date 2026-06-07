@@ -313,6 +313,44 @@ The defaults are a sensible first solve, not Guvenen's full budget (900k Sobol /
 thorough global search. 21-D local searches are far more expensive than 2-D, so
 expect this to run for hours.
 
+### Running on scavenge (preemptible, multi-node)
+For a large run, `runs/submit_scavenge.sh` spreads the work across **many nodes
+on the preemptible `scavenge` partition**, where any worker can be killed at any
+moment. It is fault-tolerant: claiming is lease-based, so a task abandoned by a
+preempted worker is detected (stale lease) and re-done by a survivor, and
+completion is defined by result files — never by a counter — so a dropped task
+can never hang a stage. The same shared work directory and file coordination as
+the single-node path are reused; only the *launch topology* changes.
+
+Two jobs, one command:
+- a small, **stable coordinator** (partition `day`) that initializes the run,
+  submits + babysits the scavenge worker array (resubmitting it if it fully
+  drains), drives the leader-only stage transitions even when every scavenge
+  worker is preempted, and writes `final_results.json` at the end;
+- a **SLURM array of workers** on `scavenge` (`--requeue`, `--signal=B:TERM@90`);
+  each array task spawns `WCORES` workers that pull tasks, heartbeat their lease,
+  and on preemption finish the current task and exit for a fast, low-waste
+  requeue.
+
+```bash
+# defaults: 16 array tasks x 8 cores = 128 scavenge cores, coordinator on `day`
+code/runs/submit_scavenge.sh
+# heavier run (n_sim=50k, 2^17 Sobol, 480 restarts), 32 nodes:
+N_SIM=50000 N_SOBOL=131072 KEEP_BEST=480 MAXITER=800 \
+  NWORKERS=32 WCORES=8 WMEM=48G code/runs/submit_scavenge.sh
+```
+The run **resumes by default**: if the coordinator is itself preempted (it is
+`--requeue`-able) or you resubmit the launcher, it re-attaches to the existing
+`WORKDIR` (the `initialized` marker means it skips re-drawing the Sobol set).
+Pass `FRESH=1` to wipe and start over. `WORKDIR` **must be on a shared
+filesystem** visible from every node (default `output/run_scavenge`).
+
+Overridable env vars: coordinator `PARTITION COORD_CORES COORD_WALLTIME
+COORD_MEM`; workers `WPARTITION NWORKERS MAXPAR WCORES WWALLTIME WMEM`; workload
+`N_SIM N_SOBOL KEEP_BEST MAXITER SEED SOBOL_SEED LEASE_TTL FREE FRESH` (plus
+`CONDA_MODULE`, `ENV_NAME`). Monitor it exactly like any other run:
+`python code/monitor.py output/run_scavenge`.
+
 ### Monitoring a live run
 While a job is optimizing, snapshot its progress without disturbing it —
 `monitor.py` is read-only and reads only the small coordination files (not the
@@ -329,12 +367,15 @@ a `run_meta.json` at start so this works before the run finishes.
 
 ### Key flags
 `--spawn N` local workers · `--worker-id`/`--workers` array mode ·
-`--free all|<names>` parameters to estimate · `--workdir` shared dir ·
-`--n-sim` individuals · `--n-sobol` Sobol draws · `--keep-best` local starts ·
-`--maxiter` local-opt iterations · `--blend-shape sqrt|linear` ·
-`--maxiter-min-frac` (exploit-restart budget, 1.0 = no scaling) · `--seed` CRN
-seed · `--sobol-seed` shared Sobol scramble seed · `--real-moments PATH` ·
-`--resume`.
+`--role auto|worker|coordinator` (single-node / scavenge array task / stable
+babysitter) · `--worker-id-offset` (distinct ids per array task) ·
+`--lease-ttl` (s before an unrefreshed in-flight task is reclaimed) · `--fresh`
+(coordinator: wipe + restart) · `--free all|<names>` parameters to estimate ·
+`--workdir` shared dir · `--n-sim` individuals · `--n-sobol` Sobol draws ·
+`--keep-best` local starts · `--maxiter` local-opt iterations ·
+`--blend-shape sqrt|linear` · `--maxiter-min-frac` (exploit-restart budget,
+1.0 = no scaling) · `--seed` CRN seed · `--sobol-seed` shared Sobol scramble
+seed · `--real-moments PATH` · `--resume`.
 
 ## 6. Layout
 ```
@@ -381,6 +422,10 @@ responsibility):
   overridable knobs; sources `setup_env` from `../benchmarking/_scaling_lib.sh`).
 - `submit_full.sh` — login-node launcher that turns env vars into matching
   `sbatch` flags, so the full run goes to any cluster with no edits.
+- `submit_scavenge.sh` + `hpc_coordinator.sh` + `hpc_workers_scavenge.sh` — the
+  preemptible, multi-node scavenge run: a stable coordinator (init + babysit +
+  aggregate) plus a `--requeue`-able worker array on `scavenge`. Fault-tolerant
+  via lease-based claiming (preempted tasks are reclaimed by survivors).
 - `hpc_21param_smoke.sh` — 4-core mini version to confirm the pipeline + data
   path before committing real compute.
 

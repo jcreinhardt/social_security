@@ -33,6 +33,7 @@ for _v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS",
 import argparse
 import json
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -48,7 +49,9 @@ _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 
 
 from msm_model import MSMConfig
 from problem import Problem
-from tiktak import FileCoordinator, run_worker, read_final
+from tiktak import (DONE, EVAL_SOBOL, LOCAL_SEARCH, FileCoordinator,
+                    _stage_polish, _stage_select, _try_become_leader,
+                    read_final, run_worker)
 
 
 def build_cfg(args):
@@ -67,6 +70,8 @@ def build_cfg(args):
         theta_max=0.995,
         max_legit_obj_val=1e8,
         penalty_weight=1e6,
+        lease_ttl=args.lease_ttl,
+        babysit_interval=args.babysit_interval,
     )
 
 
@@ -117,46 +122,76 @@ def aggregate_and_report(coord, cfg, prob):
     print(f"\nResults written to {coord.workdir}")
 
 
+def record_guvenen_objective(coord, objective, prob):
+    """Cache Q(theta) evaluated at the Guvenen parameter values once, so
+    monitor.py can show that published-point baseline next to the optimizer's
+    current best. It is constant for a given config (the shocks and target are
+    frozen), so a single evaluation at init is enough. Best-effort: a failure
+    here must not derail the run."""
+    try:
+        q = float(objective(prob.FREE_TRUE))
+        coord.write_meta("guvenen_objective", q)
+        print(f"[init] objective at Guvenen parameters: {q:.6e}", flush=True)
+    except Exception as e:  # pragma: no cover - diagnostic only
+        print(f"[init] could not evaluate the Guvenen-point objective: {e}",
+              flush=True)
+
+
+def write_run_meta(coord, cfg, prob):
+    """Drop metadata so a live monitor can interpret progress (which params are
+    free + their Guvenen values) before final_results.json exists."""
+    with open(os.path.join(coord.workdir, "run_meta.json"), "w") as fh:
+        json.dump({
+            "free_names": prob.FREE_NAMES,
+            "truth": prob.FREE_TRUE.tolist(),
+            "free_bounds": prob.FREE_BOUNDS.tolist(),
+            "n_free": prob.N_FREE,
+            "config": {
+                "n_sim": cfg.n_sim, "n_sobol": cfg.sobol_draws,
+                "keep_best": cfg.keep_best, "maxiter_local": cfg.maxiter_local,
+                "seed": cfg.seed, "sobol_seed": cfg.sobol_seed,
+            },
+        }, fh, indent=2)
+
+
 def run_one_worker(args):
     cfg = build_cfg(args)
     prob = Problem(args.free)
     coord = FileCoordinator(args.workdir)
     real_path = args.real_moments if args.real_moments else None
 
+    wid = (args.worker_id or 0) + args.worker_id_offset
+    # role 'worker' (scavenge array task): never elects a leader, never writes
+    # metadata, never aggregates -- the stable coordinator owns those. role
+    # 'auto' (single-node --spawn): worker 0 leads/aggregates as before.
+    elect = args.role != "worker"
+    is_auto_lead = args.role == "auto" and (args.worker_id or 0) == 0
+
     t0 = time.time()
-    if args.worker_id == 0:
-        # Drop metadata so a live monitor can interpret progress (which params
-        # are free + their Guvenen values) before final_results.json exists.
-        with open(os.path.join(coord.workdir, "run_meta.json"), "w") as fh:
-            json.dump({
-                "free_names": prob.FREE_NAMES,
-                "truth": prob.FREE_TRUE.tolist(),
-                "free_bounds": prob.FREE_BOUNDS.tolist(),
-                "n_free": prob.N_FREE,
-                "config": {
-                    "n_sim": cfg.n_sim, "n_sobol": cfg.sobol_draws,
-                    "keep_best": cfg.keep_best, "maxiter_local": cfg.maxiter_local,
-                    "seed": cfg.seed, "sobol_seed": cfg.sobol_seed,
-                },
-            }, fh, indent=2)
+    if is_auto_lead:
+        write_run_meta(coord, cfg, prob)
         print(f"[worker 0] building objective "
               f"({'real' if real_path else 'synthetic'} targets, "
               f"{prob.N_FREE} free params, n_sim={cfg.n_sim}) ...", flush=True)
         print(f"[worker 0] monitor live with:  "
               f"python code/monitor.py {args.workdir}", flush=True)
     objective = prob.make_objective(cfg, real_data_path=real_path)
+    if is_auto_lead:
+        record_guvenen_objective(coord, objective, prob)
 
-    run_worker(coord, objective, prob.FREE_BOUNDS, cfg, wid=args.worker_id)
+    run_worker(coord, objective, prob.FREE_BOUNDS, cfg, wid=wid, elect=elect)
 
-    if args.worker_id == 0:
+    if is_auto_lead:
         aggregate_and_report(coord, cfg, prob)
         print(f"[worker 0] wall time {time.time() - t0:.1f}s", flush=True)
 
 
 def spawn_workers(args):
-    """Parent: clear the workdir (unless --resume) and launch N child workers
-    on this machine, then wait for them all."""
-    if not args.resume and os.path.isdir(args.workdir):
+    """Parent: launch N child workers on this machine, then wait for them all.
+    In the default role ('auto') the workdir is cleared first (unless --resume);
+    in role 'worker' (a scavenge node joining a shared run) it is NEVER cleared,
+    so a node can contribute cores without nuking peers' results."""
+    if args.role != "worker" and not args.resume and os.path.isdir(args.workdir):
         shutil.rmtree(args.workdir)
     os.makedirs(args.workdir, exist_ok=True)
 
@@ -164,6 +199,9 @@ def spawn_workers(args):
     passthrough = [
         "--workdir", args.workdir,
         "--workers", str(n),
+        "--role", args.role,
+        "--worker-id-offset", str(args.worker_id_offset),
+        "--lease-ttl", str(args.lease_ttl),
         "--n-sim", str(args.n_sim),
         "--n-sobol", str(args.n_sobol),
         "--keep-best", str(args.keep_best),
@@ -177,8 +215,25 @@ def spawn_workers(args):
     if args.real_moments:
         passthrough += ["--real-moments", args.real_moments]
 
-    print(f"Spawning {n} worker process(es) on workdir {args.workdir}", flush=True)
+    print(f"Spawning {n} worker process(es) (role={args.role}) on workdir "
+          f"{args.workdir}", flush=True)
     procs = []
+
+    # Forward a preemption signal (SLURM --signal) to the children so each can
+    # finish its current task, drop its lease, and exit cleanly for a fast,
+    # low-waste requeue. (The lease TTL reaper recovers the work regardless.)
+    def _forward(signum, frame):
+        for p in procs:
+            try:
+                p.send_signal(signal.SIGTERM)
+            except Exception:
+                pass
+    for _sig in (signal.SIGTERM, signal.SIGUSR1):
+        try:
+            signal.signal(_sig, _forward)
+        except (ValueError, OSError):
+            pass
+
     for i in range(n):
         cmd = [sys.executable, os.path.abspath(__file__),
                "--worker-id", str(i)] + passthrough
@@ -191,6 +246,98 @@ def spawn_workers(args):
         sys.exit(1)
 
 
+# ── Coordinator (stable partition): init + babysit + aggregate ──────────────
+
+def _submit_array(submit_cmd):
+    """Run the env-provided sbatch command for the scavenge worker array and
+    return its job id (parses both `--parsable` and the normal 'Submitted batch
+    job <id>' forms). Returns None on failure."""
+    import shlex
+    out = subprocess.run(shlex.split(submit_cmd), capture_output=True, text=True)
+    if out.returncode != 0:
+        print(f"[coordinator] array submit failed: {out.stderr.strip()}",
+              flush=True)
+        return None
+    s = out.stdout.strip()
+    return s.split(";")[0].split()[-1] if s else None
+
+
+def _array_alive(jobid):
+    """True if the array job still has any pending/running task in the queue."""
+    if not jobid:
+        return False
+    out = subprocess.run(["squeue", "-j", str(jobid), "-h", "-o", "%i"],
+                         capture_output=True, text=True)
+    return out.returncode == 0 and out.stdout.strip() != ""
+
+
+def run_coordinator(args):
+    """Stable-partition babysitter: initialize the run, keep a scavenge worker
+    array alive (resubmitting it if it drains), drive the leader-only stage
+    transitions even when no scavenge worker is up, and aggregate at the end.
+
+    Resumes by default (re-attaches to an initialized workdir); pass --fresh to
+    wipe and start over. The array (re)submission command is taken from the
+    WORKER_SUBMIT_CMD env var; if unset, the coordinator only orchestrates +
+    aggregates (workers are expected to be launched separately, e.g. in tests)."""
+    workdir = os.path.abspath(args.workdir)
+    if args.fresh and os.path.isdir(workdir):
+        print(f"[coordinator] --fresh: wiping {workdir}", flush=True)
+        shutil.rmtree(workdir)
+
+    cfg = build_cfg(args)
+    prob = Problem(args.free)
+    coord = FileCoordinator(workdir)
+    real_path = args.real_moments if args.real_moments else None
+
+    write_run_meta(coord, cfg, prob)
+    print(f"[coordinator] building objective "
+          f"({'real' if real_path else 'synthetic'} targets, "
+          f"{prob.N_FREE} free params, n_sim={cfg.n_sim}) ...", flush=True)
+    objective = prob.make_objective(cfg, real_data_path=real_path)
+    bounds = prob.FREE_BOUNDS
+    record_guvenen_objective(coord, objective, prob)
+
+    # Initialize the run (draw the Sobol set, open EVAL_SOBOL) if not already.
+    if coord.get_state() is None:
+        _try_become_leader(coord, objective, bounds, cfg)
+    print(f"[coordinator] run state: {coord.get_state()}", flush=True)
+    print(f"[coordinator] monitor live with:  "
+          f"python code/monitor.py {workdir}", flush=True)
+
+    submit_cmd = os.environ.get("WORKER_SUBMIT_CMD", "").strip()
+    array_jobid = None
+    if submit_cmd:
+        array_jobid = _submit_array(submit_cmd)
+        print(f"[coordinator] submitted scavenge worker array: {array_jobid}",
+              flush=True)
+    else:
+        print("[coordinator] WORKER_SUBMIT_CMD unset; not managing a worker "
+              "array (launch workers separately).", flush=True)
+
+    t0 = time.time()
+    while coord.get_state() != DONE:
+        # Advance the leader-only stages. Each no-ops until its stage is
+        # complete, so it is safe to poll-call every tick -- this guarantees
+        # forward progress even if every scavenge worker is preempted.
+        if coord.get_state() == EVAL_SOBOL:
+            _stage_select(coord, cfg, wid=-1)
+        if coord.get_state() == LOCAL_SEARCH:
+            _stage_polish(coord, objective, bounds, cfg, wid=-1)
+        # Keep the scavenge array alive: resubmit if it has fully drained.
+        if submit_cmd and coord.get_state() != DONE and not _array_alive(array_jobid):
+            array_jobid = _submit_array(submit_cmd)
+            print(f"[coordinator] scavenge array drained; resubmitted: "
+                  f"{array_jobid}", flush=True)
+        if coord.get_state() == DONE:
+            break
+        time.sleep(cfg.babysit_interval)
+
+    aggregate_and_report(coord, cfg, prob)
+    print(f"[coordinator] run complete; wall time {time.time() - t0:.1f}s",
+          flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -199,11 +346,32 @@ def main():
     ap.add_argument("--spawn", type=int, default=None,
                     help="parent mode: spawn this many local workers")
     ap.add_argument("--worker-id", type=int, default=None,
-                    help="worker mode: this worker's id (0 aggregates)")
+                    help="worker mode: this worker's id (0 aggregates in role "
+                         "'auto')")
+    ap.add_argument("--worker-id-offset", type=int, default=0,
+                    help="added to --worker-id (and to each --spawn child's id) "
+                         "so a scavenge array task's workers get distinct ids; "
+                         "for logging only")
     ap.add_argument("--workers", type=int, default=1,
                     help="total number of workers (informational)")
+    ap.add_argument("--role", choices=("auto", "worker", "coordinator"),
+                    default="auto",
+                    help="auto: single-node --spawn (worker 0 leads+aggregates). "
+                         "worker: scavenge array task (no lead/meta/aggregate, "
+                         "waits for the coordinator's init). coordinator: stable "
+                         "babysitter that inits, keeps the array alive, and "
+                         "aggregates.")
     ap.add_argument("--resume", action="store_true",
                     help="do not wipe the workdir before spawning")
+    ap.add_argument("--fresh", action="store_true",
+                    help="coordinator only: wipe the workdir and start over "
+                         "(default is to resume an existing run)")
+    ap.add_argument("--lease-ttl", type=float, default=600.0,
+                    help="seconds before an unrefreshed in-flight task is "
+                         "presumed abandoned and reclaimed (preemption recovery)")
+    ap.add_argument("--babysit-interval", type=float, default=60.0,
+                    help="coordinator poll cadence (s): stage transitions + "
+                         "array-alive checks")
     # problem / config knobs
     ap.add_argument("--free", default="a1,rho1",
                     help="which parameters to estimate: 'all' (full 21-param "
@@ -230,8 +398,10 @@ def main():
         repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         args.workdir = os.path.join(repo, "output", "run_2param")
 
-    # Worker mode (explicit id) takes precedence; otherwise spawn.
-    if args.worker_id is not None:
+    # Coordinator mode first; then worker mode (explicit id); else spawn.
+    if args.role == "coordinator":
+        run_coordinator(args)
+    elif args.worker_id is not None:
         run_one_worker(args)
     else:
         if args.spawn is None:
