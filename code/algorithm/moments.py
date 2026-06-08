@@ -72,11 +72,18 @@ def _mean_miss(x):
 
 @njit(cache=True)
 def _sdskewkurt_miss(x):
-    """Sample sd (ddof=1) plus bias-corrected skewness and (excess) kurtosis of
-    the non-missing entries. Reproduces scipy.stats.skew/kurtosis(bias=False)
-    exactly: bias-corrected for n>=3 (skew) / n>=4 (kurt), biased estimator
-    below that (matching scipy's small-n branch), all in two passes and with no
-    scipy wrapper overhead."""
+    """Sample sd (ddof=1), skewness, and RAW kurtosis of the non-missing
+    entries, matching Guvenen's ``SdSkewKurt`` (utilities.F90) -- the Stata
+    convention, NOT scipy's:
+
+        sd   = sqrt(sum((x-mean)^2) / (n-1))          # N-1 sample sd
+        skew = sum((x-mean)^3) / (n * sd^3)           # biased, N-1 sd in denom
+        kurt = sum((x-mean)^4) / (n * sd^4)           # RAW kurtosis, normal = 3
+
+    Crucially the kurtosis is RAW (no -3): the target .dat moments were produced
+    by Guvenen's pipeline in raw units (a Gaussian gives 3), so the simulated
+    moment must match. There is no bias correction (the Fortran comment is
+    explicit: "!-3.0_DP This is the one used by STATA")."""
     n = 0
     s = 0.0
     for i in range(x.shape[0]):
@@ -102,17 +109,11 @@ def _sdskewkurt_miss(x):
     m3 /= n
     m4 /= n
     sd = (m2 * n / (n - 1)) ** 0.5      # sample std, ddof=1
-    if m2 <= 0.0:
+    if sd <= 0.0:
         return sd, 0.0, 0.0
-    if n >= 3:
-        skew = (m3 / m2 ** 1.5) * (n * (n - 1)) ** 0.5 / (n - 2)
-    else:
-        skew = m3 / m2 ** 1.5            # biased (n == 2)
-    if n >= 4:
-        g2 = m4 / (m2 * m2) - 3.0
-        kurt = ((n + 1) * g2 + 6.0) * (n - 1) / ((n - 2) * (n - 3))
-    else:
-        kurt = m4 / (m2 * m2) - 3.0      # biased (n in {2, 3})
+    sd3 = sd * sd * sd
+    skew = m3 / sd3                      # Stata: biased, N-1 sd in denominator
+    kurt = m4 / (sd3 * sd)              # RAW kurtosis (normal = 3, no -3)
     return sd, skew, kurt
 
 
@@ -296,7 +297,7 @@ def calculate_moments(ysim_in):
 
             for j in range(NVASEINC):
                 lb2 = int(np.floor(nonmiss * (VASEINCPCT[j] - 1) / 100))
-                ub2 = min(int(np.floor(nonmiss * (VASEINCPCT[j + 1] - 1) / 100)), nonmiss - 1)
+                ub2 = min(int(np.floor(nonmiss * (VASEINCPCT[j + 1] - 1) / 100)) - 1, nonmiss - 1)
                 if ub2 > lb2:
                     ssk = _sdskewkurt_miss(temp[lb2:ub2 + 1, 1])
                     ssk5 = _sdskewkurt_miss(temp[lb2:ub2 + 1, 2])
@@ -322,7 +323,7 @@ def calculate_moments(ysim_in):
 
         for j in range(NIRINC):
             lb2 = int(np.floor(nonmiss * (IRAVGINCPCT[j] - 1) / 100))
-            ub2 = min(int(np.floor(nonmiss * (IRAVGINCPCT[j + 1] - 1) / 100)), nonmiss - 1)
+            ub2 = min(int(np.floor(nonmiss * (IRAVGINCPCT[j + 1] - 1) / 100)) - 1, nonmiss - 1)
             if ub2 <= lb2:
                 continue
 
@@ -335,7 +336,7 @@ def calculate_moments(ysim_in):
 
             for k in range(NIRCHG):
                 lb3 = int(np.floor(nonmiss2 * (IRCHGPCT[k] - 1) / 100))
-                ub3 = min(int(np.floor(nonmiss2 * (IRCHGPCT[k + 1] - 1) / 100)), nonmiss2 - 1)
+                ub3 = min(int(np.floor(nonmiss2 * (IRCHGPCT[k + 1] - 1) / 100)) - 1, nonmiss2 - 1)
                 if ub3 > lb3:
                     for l in range(NLAG + 1):
                         irm[i, j, k, l] = _mean_miss(temp2[lb3:ub3 + 1, l])
@@ -364,7 +365,7 @@ def calculate_moments(ysim_in):
 
     for j in range(NLTINCPCT):
         lb = int(np.floor(nonmiss * (LTINCPCT[j] - 1) / 100))
-        ub = min(int(np.floor(nonmiss * (LTINCPCT[j + 1] - 1) / 100)), nonmiss - 1)
+        ub = min(int(np.floor(nonmiss * (LTINCPCT[j + 1] - 1) / 100)) - 1, nonmiss - 1)
         for h in range(LTH):
             if ub > lb:
                 incg[j, h] = _mean_miss(temp_lt[lb:ub + 1, h + 1])
