@@ -28,6 +28,13 @@ except Exception:  # pragma: no cover
             return f
         return deco
 
+# Guvenen top-codes the simulated panel before computing any moments
+# (OBJECTIVE.f90 SIMULATE: ``WHERE(ysim>truncate) ysim=truncate``, with
+# ``truncate = 2*10**4`` in utilities.F90). Clipping the income right tail
+# shapes the skew/kurtosis of income changes and var_lny, so it must be applied
+# to match the data targets.
+TRUNCATE = 2.0e4
+
 # Frozen Common-Random-Number shocks.
 Shocks = namedtuple(
     "Shocks",
@@ -166,7 +173,7 @@ def simulate_income(theta, n_sim, hmax, seed, shocks=None):
     if shocks is None:
         shocks = draw_shocks(n_sim, hmax, seed)
 
-    return _simulate_income_kernel(
+    ysim = _simulate_income_kernel(
         n_sim, hmax,
         a0, a1, a2, L11, L21, L22, rho1, sd_z0,
         pdf_ar, mu_eta1, mu_eta2, sd_eta1, sd_eta2,
@@ -175,3 +182,6 @@ def simulate_income(theta, n_sim, hmax, seed, shocks=None):
         shocks.rn_hip1, shocks.rn_hip2, shocks.rn_z0,
         shocks.rn_p_ar, shocks.rn_eta, shocks.rn_unemp,
         shocks.rn_nu, shocks.rn_p_eps, shocks.rn_eps)
+    # Top-code the panel (Guvenen's SIMULATE truncation), in place.
+    np.minimum(ysim, TRUNCATE, out=ysim)
+    return ysim
