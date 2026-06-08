@@ -15,12 +15,18 @@
 #                         that pull tasks, heartbeat a lease, and on preemption
 #                         leave their in-flight task to be reclaimed.
 #
-# Defaults (16 array tasks x 8 cores = 128 scavenge cores):
-#     code/runs/submit_scavenge.sh
+# Defaults (128 array tasks x 4 cores = 512 scavenge cores, 1h tasks; reduced-
+# Guvenen workload n_sim=100k, 2^16 Sobol, 1000 restarts). Small short tasks
+# schedule easily on scavenge -- a node free for an hour can take one -- and the
+# coordinator resubmits the array as tasks expire, so progress accumulates:
+#     ACCOUNT=pi_johng code/runs/submit_scavenge.sh
 #
-# Heavier sanity re-run (n_sim=50k, 2^17 Sobol, 480 restarts):
-#     N_SIM=50000 N_SOBOL=131072 KEEP_BEST=480 MAXITER=800 \
-#       NWORKERS=32 WCORES=8 WMEM=48G code/runs/submit_scavenge.sh
+# Useful-core ceiling is KEEP_BEST (the local-search restarts): the Sobol screen
+# parallelizes over N_SOBOL points but is short, while the local stage has only
+# KEEP_BEST independent restarts, so >KEEP_BEST cores idle during it.
+#
+# Lighter smoke-test of the 1h/requeue/resubmit loop (one 4-core worker):
+#     NWORKERS=1 code/runs/submit_scavenge.sh
 #
 # Resume a run that was interrupted (coordinator re-attaches; default behavior):
 #     code/runs/submit_scavenge.sh          # FRESH=0 by default
@@ -40,17 +46,17 @@ COORD_MEM="${COORD_MEM:-8G}"
 
 # ---- worker array (scavenge) resources ------------------------------------
 WPARTITION="${WPARTITION:-scavenge}"     # preemptible partition for the workers
-NWORKERS="${NWORKERS:-16}"               # number of array tasks (nodes)
+NWORKERS="${NWORKERS:-128}"              # number of array tasks (nodes)
 MAXPAR="${MAXPAR:-$NWORKERS}"            # max array tasks running at once
-WCORES="${WCORES:-8}"                    # worker processes per array task
-WWALLTIME="${WWALLTIME:-1-00:00:00}"
-WMEM="${WMEM:-32G}"                      # WCORES x ~0.9 GB at n_sim=50k
+WCORES="${WCORES:-4}"                    # worker processes per array task
+WWALLTIME="${WWALLTIME:-1:00:00}"        # short tasks -> easy to schedule on scavenge
+WMEM="${WMEM:-12G}"                      # WCORES x ~2 GB at n_sim=100k
 
 # ---- workload knobs (shared) ----------------------------------------------
-N_SIM="${N_SIM:-20000}"
-N_SOBOL="${N_SOBOL:-20000}"
-KEEP_BEST="${KEEP_BEST:-96}"
-MAXITER="${MAXITER:-800}"
+N_SIM="${N_SIM:-100000}"
+N_SOBOL="${N_SOBOL:-65536}"
+KEEP_BEST="${KEEP_BEST:-1000}"
+MAXITER="${MAXITER:-1000}"
 SEED="${SEED:-42}"
 SOBOL_SEED="${SOBOL_SEED:-999}"
 LEASE_TTL="${LEASE_TTL:-600}"
@@ -64,8 +70,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 cd "$ROOT"
 
-# Absolute, shared-filesystem run directory used by EVERY job.
-WORKDIR="${WORKDIR:-$ROOT/output/run_scavenge}"
+# Absolute, shared-filesystem run directory used by EVERY job. A fresh name
+# (vs a prior run with different N_SOBOL/KEEP_BEST) avoids re-attaching to stale
+# init state and the slow wipe of the old dir's many small files.
+WORKDIR="${WORKDIR:-$ROOT/output/run_scavenge_4c}"
 
 # Charge both jobs to a specific account if one is given (empty -> your default).
 ACCT_FLAG=""
