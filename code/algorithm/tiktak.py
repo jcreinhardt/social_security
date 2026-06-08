@@ -544,7 +544,8 @@ def _stage_polish(coord, objective, bounds, cfg, wid):
         if rb is None:
             starts = np.load(coord._p("x_starts.npy"))
             rb = (starts[0], float("inf"))
-        best_x, best_f = local_search(objective, rb[0], bounds, cfg)
+        best_x, best_f = local_search(objective, rb[0], bounds, cfg,
+                                      maxiter=cfg.maxiter_polish)
         if not (np.isfinite(best_f) and best_f <= rb[1]):
             best_x, best_f = rb[0], rb[1]
         coord._write_json(coord._p("final_result.json"),

@@ -35,6 +35,12 @@ class MSMConfig:
     # to the incumbent best) need far fewer iterations; the per-restart budget
     # scales from maxiter_local (at theta_k=0) down to this fraction (at =1).
     maxiter_min_frac: float = 0.15
+    # Stage D POLISH (one final local search from the global best) uses its OWN
+    # budget, decoupled from the restarts: the restarts are deliberately coarse
+    # (so a preemptible scavenge worker can finish one inside its short walltime),
+    # while the polish runs on the stable coordinator with no walltime pressure
+    # and does the accurate final convergence. Default generous.
+    maxiter_polish: int = 1_000
 
     # TikTak blending: x_start = theta_k * z_star + (1-theta_k) * sobol_start,
     # theta_k ramping theta_min -> theta_max across the restarts.

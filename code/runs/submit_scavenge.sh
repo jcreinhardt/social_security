@@ -56,7 +56,15 @@ WMEM="${WMEM:-12G}"                      # WCORES x ~2 GB at n_sim=100k
 N_SIM="${N_SIM:-100000}"
 N_SOBOL="${N_SOBOL:-65536}"
 KEEP_BEST="${KEEP_BEST:-1000}"
-MAXITER="${MAXITER:-1000}"
+# Per-restart budget for the LOCAL_SEARCH stage. Must be small enough that one
+# 21-dim restart finishes well inside a worker's WWALLTIME (at n_sim=100k a
+# restart is ~minutes at MAXITER=100, but >1h at MAXITER=1000 -- which would
+# stall the stage on a 1h scavenge worker). The POLISH (below) does the final
+# accurate convergence, so coarse restarts here are by design.
+MAXITER="${MAXITER:-100}"
+# Budget for the final POLISH local search. Runs on the stable coordinator
+# (no walltime pressure), so it can be generous.
+MAXITER_POLISH="${MAXITER_POLISH:-1000}"
 SEED="${SEED:-42}"
 SOBOL_SEED="${SOBOL_SEED:-999}"
 LEASE_TTL="${LEASE_TTL:-600}"
@@ -82,7 +90,7 @@ ACCT_FLAG=""
 echo "Submitting preemptible scavenge run:"
 echo "  coordinator: partition=$PARTITION cores=$COORD_CORES walltime=$COORD_WALLTIME mem=$COORD_MEM"
 echo "  workers:     partition=$WPARTITION array=0-$((NWORKERS-1))%$MAXPAR cores/task=$WCORES walltime=$WWALLTIME mem=$WMEM"
-echo "  workload:    n_sim=$N_SIM n_sobol=$N_SOBOL keep_best=$KEEP_BEST maxiter=$MAXITER lease_ttl=$LEASE_TTL fresh=$FRESH"
+echo "  workload:    n_sim=$N_SIM n_sobol=$N_SOBOL keep_best=$KEEP_BEST maxiter=$MAXITER polish=$MAXITER_POLISH lease_ttl=$LEASE_TTL fresh=$FRESH"
 echo "  account:     ${ACCOUNT:-<default>}"
 echo "  workdir:     $WORKDIR  (must be on a shared filesystem)"
 
@@ -96,6 +104,6 @@ exec sbatch \
     --time="$COORD_WALLTIME" \
     --mem="$COORD_MEM" \
     $ACCT_FLAG \
-    --export=ALL,WORKDIR="$WORKDIR",N_SIM="$N_SIM",N_SOBOL="$N_SOBOL",KEEP_BEST="$KEEP_BEST",MAXITER="$MAXITER",SEED="$SEED",SOBOL_SEED="$SOBOL_SEED",LEASE_TTL="$LEASE_TTL",FREE="$FREE",FRESH="$FRESH",ACCOUNT="$ACCOUNT",WPARTITION="$WPARTITION",NWORKERS="$NWORKERS",MAXPAR="$MAXPAR",WCORES="$WCORES",WWALLTIME="$WWALLTIME",WMEM="$WMEM" \
+    --export=ALL,WORKDIR="$WORKDIR",N_SIM="$N_SIM",N_SOBOL="$N_SOBOL",KEEP_BEST="$KEEP_BEST",MAXITER="$MAXITER",MAXITER_POLISH="$MAXITER_POLISH",SEED="$SEED",SOBOL_SEED="$SOBOL_SEED",LEASE_TTL="$LEASE_TTL",FREE="$FREE",FRESH="$FRESH",ACCOUNT="$ACCOUNT",WPARTITION="$WPARTITION",NWORKERS="$NWORKERS",MAXPAR="$MAXPAR",WCORES="$WCORES",WWALLTIME="$WWALLTIME",WMEM="$WMEM" \
     "$@" \
     code/runs/hpc_coordinator.sh

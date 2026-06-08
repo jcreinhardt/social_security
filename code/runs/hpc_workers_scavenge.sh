@@ -32,7 +32,8 @@ WORKDIR="${WORKDIR:-$ROOT/output/run_scavenge}"
 N_SIM="${N_SIM:-20000}"
 N_SOBOL="${N_SOBOL:-20000}"
 KEEP_BEST="${KEEP_BEST:-96}"
-MAXITER="${MAXITER:-800}"
+MAXITER="${MAXITER:-100}"                 # per-restart budget; must fit the worker walltime
+MAXITER_POLISH="${MAXITER_POLISH:-1000}" # forwarded for cfg consistency (polish runs on coordinator)
 SEED="${SEED:-42}"
 SOBOL_SEED="${SOBOL_SEED:-999}"
 LEASE_TTL="${LEASE_TTL:-600}"
@@ -61,6 +62,7 @@ python code/run_tiktak.py \
     --n-sobol "$N_SOBOL" \
     --keep-best "$KEEP_BEST" \
     --maxiter "$MAXITER" \
+    --maxiter-polish "$MAXITER_POLISH" \
     --seed "$SEED" \
     --sobol-seed "$SOBOL_SEED" \
     --lease-ttl "$LEASE_TTL" \
