@@ -57,14 +57,16 @@ N_SIM="${N_SIM:-100000}"
 N_SOBOL="${N_SOBOL:-65536}"
 KEEP_BEST="${KEEP_BEST:-1000}"
 # Per-restart budget for the LOCAL_SEARCH stage. Must be small enough that one
-# 21-dim restart finishes well inside a worker's WWALLTIME (at n_sim=100k a
-# restart is ~minutes at MAXITER=100, but >1h at MAXITER=1000 -- which would
-# stall the stage on a 1h scavenge worker). The POLISH (below) does the final
+# 21-dim Powell restart finishes well inside a worker's WWALLTIME. At n_sim=100k
+# one objective eval is ~0.9s and a restart is ~100s of evals/maxiter, so a
+# restart is roughly maxiter*~0.5min: MAXITER=20 -> ~15-30min (fits 1h),
+# MAXITER=100 -> 1-3h (stalls a 1h worker). The POLISH (below) does the final
 # accurate convergence, so coarse restarts here are by design.
-MAXITER="${MAXITER:-100}"
-# Budget for the final POLISH local search. Runs on the stable coordinator
-# (no walltime pressure), so it can be generous.
-MAXITER_POLISH="${MAXITER_POLISH:-1000}"
+MAXITER="${MAXITER:-20}"
+# Budget for the final POLISH local search. Runs on the stable coordinator,
+# but still at full n_sim, so it is NOT free: at n_sim=100k, ~250 is a few hours
+# (fits the 1-day coordinator); 1000 would be tens of hours and never finish.
+MAXITER_POLISH="${MAXITER_POLISH:-250}"
 SEED="${SEED:-42}"
 SOBOL_SEED="${SOBOL_SEED:-999}"
 LEASE_TTL="${LEASE_TTL:-600}"
