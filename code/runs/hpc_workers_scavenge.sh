@@ -32,7 +32,8 @@ WORKDIR="${WORKDIR:-$ROOT/output/run_scavenge}"
 N_SIM="${N_SIM:-20000}"
 N_SOBOL="${N_SOBOL:-20000}"
 KEEP_BEST="${KEEP_BEST:-96}"
-MAXITER="${MAXITER:-20}"                 # per-restart budget; must fit the worker walltime
+N_SIM_SCREEN="${N_SIM_SCREEN:-0}"        # multi-fidelity screen n_sim (0 = off)
+MAXITER="${MAXITER:-50}"                 # per-restart budget; must fit the worker walltime
 MAXITER_POLISH="${MAXITER_POLISH:-250}" # forwarded for cfg consistency (polish runs on coordinator)
 SEED="${SEED:-42}"
 SOBOL_SEED="${SOBOL_SEED:-999}"
@@ -59,6 +60,7 @@ python code/run_tiktak.py \
     --worker-id-offset "$((ATASK * WCORES))" \
     --free "$FREE" \
     --n-sim "$N_SIM" \
+    --n-sim-screen "$N_SIM_SCREEN" \
     --n-sobol "$N_SOBOL" \
     --keep-best "$KEEP_BEST" \
     --maxiter "$MAXITER" \

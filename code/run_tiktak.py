@@ -31,6 +31,7 @@ for _v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS",
     os.environ.setdefault(_v, "1")
 
 import argparse
+import dataclasses
 import json
 import shutil
 import signal
@@ -65,6 +66,7 @@ def build_cfg(args):
         maxiter_local=args.maxiter,
         maxiter_min_frac=args.maxiter_min_frac,
         maxiter_polish=args.maxiter_polish,
+        n_sim_screen=args.n_sim_screen,
         blend_shape=args.blend_shape,
         local_methods=("Powell", "Nelder-Mead"),
         theta_min=0.1,
@@ -74,6 +76,21 @@ def build_cfg(args):
         lease_ttl=args.lease_ttl,
         babysit_interval=args.babysit_interval,
     )
+
+
+def build_objectives(prob, cfg, real_path):
+    """Build (objective_screen, objective_polish). With multi-fidelity
+    (0 < cfg.n_sim_screen < cfg.n_sim) the Sobol screen + local restarts use the
+    cheaper screen objective and the final polish uses the full-n_sim one;
+    otherwise both are the same object. The polish objective is also the one to
+    use as the reported / Guvenen-comparison reference (full fidelity)."""
+    obj_polish = prob.make_objective(cfg, real_data_path=real_path)
+    ns = cfg.n_sim_screen
+    if not ns or ns >= cfg.n_sim:
+        return obj_polish, obj_polish
+    cfg_screen = dataclasses.replace(cfg, n_sim=ns)
+    obj_screen = prob.make_objective(cfg_screen, real_data_path=real_path)
+    return obj_screen, obj_polish
 
 
 def aggregate_and_report(coord, cfg, prob):
@@ -171,16 +188,19 @@ def run_one_worker(args):
     t0 = time.time()
     if is_auto_lead:
         write_run_meta(coord, cfg, prob)
+        screen = cfg.n_sim_screen if (0 < cfg.n_sim_screen < cfg.n_sim) else cfg.n_sim
         print(f"[worker 0] building objective "
               f"({'real' if real_path else 'synthetic'} targets, "
-              f"{prob.N_FREE} free params, n_sim={cfg.n_sim}) ...", flush=True)
+              f"{prob.N_FREE} free params, screen n_sim={screen}, "
+              f"polish n_sim={cfg.n_sim}) ...", flush=True)
         print(f"[worker 0] monitor live with:  "
               f"python code/monitor.py {args.workdir}", flush=True)
-    objective = prob.make_objective(cfg, real_data_path=real_path)
+    objective, objective_polish = build_objectives(prob, cfg, real_path)
     if is_auto_lead:
-        record_guvenen_objective(coord, objective, prob)
+        record_guvenen_objective(coord, objective_polish, prob)
 
-    run_worker(coord, objective, prob.FREE_BOUNDS, cfg, wid=wid, elect=elect)
+    run_worker(coord, objective, prob.FREE_BOUNDS, cfg, wid=wid, elect=elect,
+               objective_polish=objective_polish)
 
     if is_auto_lead:
         aggregate_and_report(coord, cfg, prob)
@@ -204,6 +224,7 @@ def spawn_workers(args):
         "--worker-id-offset", str(args.worker_id_offset),
         "--lease-ttl", str(args.lease_ttl),
         "--n-sim", str(args.n_sim),
+        "--n-sim-screen", str(args.n_sim_screen),
         "--n-sobol", str(args.n_sobol),
         "--keep-best", str(args.keep_best),
         "--maxiter", str(args.maxiter),
@@ -380,6 +401,10 @@ def main():
                          "problem) or a comma-separated subset like 'a1,rho1' "
                          "(the rest are fixed at the Guvenen values)")
     ap.add_argument("--n-sim", type=int, default=25_000)
+    ap.add_argument("--n-sim-screen", type=int, default=0,
+                    help="multi-fidelity: run the Sobol screen + local restarts "
+                         "at this (smaller) n_sim, and the final polish at the "
+                         "full --n-sim. 0 disables (everything at --n-sim).")
     ap.add_argument("--n-sobol", type=int, default=2048)
     ap.add_argument("--keep-best", type=int, default=40)
     ap.add_argument("--maxiter", type=int, default=600,

@@ -27,9 +27,10 @@ ENV_NAME="${ENV_NAME:-socsec_mac}"
 # ---- knobs (forwarded by the launcher; safe defaults if run by hand) -------
 WORKDIR="${WORKDIR:-$ROOT/output/run_scavenge}"
 N_SIM="${N_SIM:-20000}"
+N_SIM_SCREEN="${N_SIM_SCREEN:-0}"        # multi-fidelity screen n_sim (0 = off); see submit_scavenge.sh
 N_SOBOL="${N_SOBOL:-20000}"
 KEEP_BEST="${KEEP_BEST:-96}"
-MAXITER="${MAXITER:-20}"                 # per-restart budget (see submit_scavenge.sh)
+MAXITER="${MAXITER:-50}"                 # per-restart budget (see submit_scavenge.sh)
 MAXITER_POLISH="${MAXITER_POLISH:-250}" # final polish budget (runs here, full n_sim ~ a few hours)
 SEED="${SEED:-42}"
 SOBOL_SEED="${SOBOL_SEED:-999}"
@@ -69,7 +70,7 @@ FRESH_FLAG=""
 
 echo
 echo "Coordinator: workdir=$WORKDIR  free=$FREE  n_sim=$N_SIM n_sobol=$N_SOBOL"
-echo "  keep_best=$KEEP_BEST maxiter=$MAXITER polish=$MAXITER_POLISH lease_ttl=$LEASE_TTL fresh=$FRESH"
+echo "  n_sim=$N_SIM screen=$N_SIM_SCREEN keep_best=$KEEP_BEST maxiter=$MAXITER polish=$MAXITER_POLISH lease_ttl=$LEASE_TTL fresh=$FRESH"
 echo "  worker array: $NWORKERS x $WCORES cores on $WPARTITION"
 echo
 
@@ -78,6 +79,7 @@ python code/run_tiktak.py \
     $FRESH_FLAG \
     --free "$FREE" \
     --n-sim "$N_SIM" \
+    --n-sim-screen "$N_SIM_SCREEN" \
     --n-sobol "$N_SOBOL" \
     --keep-best "$KEEP_BEST" \
     --maxiter "$MAXITER" \

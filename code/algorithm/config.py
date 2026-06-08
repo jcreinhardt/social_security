@@ -28,6 +28,14 @@ class MSMConfig:
     keep_best: int = 2_000       # Local-search starts. Guvenen: nstart=2000
                                  # (ESTIMATE.f90:31)
 
+    # Multi-fidelity: the Sobol screen + local restarts (exploration -- they only
+    # need to RANK basins) may run at a cheaper, noisier n_sim_screen, while the
+    # final POLISH (which sets the reported estimate's accuracy) runs at the full
+    # n_sim. 0 -> disabled (screen == polish == n_sim). At n_sim=100k one eval is
+    # ~0.9s, so screening at ~30k (~3x cheaper) lets a restart fit a short
+    # preemptible walltime without making the final estimate coarse.
+    n_sim_screen: int = 0
+
     # Stage B: local optimization
     local_methods: tuple = ("Powell", "Nelder-Mead")
     maxiter_local: int = 1_000

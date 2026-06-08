@@ -53,16 +53,20 @@ WWALLTIME="${WWALLTIME:-1:00:00}"        # short tasks -> easy to schedule on sc
 WMEM="${WMEM:-12G}"                      # WCORES x ~2 GB at n_sim=100k
 
 # ---- workload knobs (shared) ----------------------------------------------
-N_SIM="${N_SIM:-100000}"
+N_SIM="${N_SIM:-100000}"                  # full fidelity (the final POLISH + reported estimate)
+# Multi-fidelity: the Sobol screen + local restarts run at this cheaper n_sim
+# (they only need to rank/explore basins); the polish runs at the full N_SIM.
+# At ~30k an eval is ~3x cheaper than at 100k, so restarts fit a 1h worker with
+# a useful MAXITER. Set =N_SIM (or 0) to disable.
+N_SIM_SCREEN="${N_SIM_SCREEN:-30000}"
 N_SOBOL="${N_SOBOL:-65536}"
 KEEP_BEST="${KEEP_BEST:-1000}"
 # Per-restart budget for the LOCAL_SEARCH stage. Must be small enough that one
-# 21-dim Powell restart finishes well inside a worker's WWALLTIME. At n_sim=100k
-# one objective eval is ~0.9s and a restart is ~100s of evals/maxiter, so a
-# restart is roughly maxiter*~0.5min: MAXITER=20 -> ~15-30min (fits 1h),
-# MAXITER=100 -> 1-3h (stalls a 1h worker). The POLISH (below) does the final
-# accurate convergence, so coarse restarts here are by design.
-MAXITER="${MAXITER:-20}"
+# 21-dim Powell restart finishes well inside a worker's WWALLTIME. At the screen
+# n_sim=30k an eval is ~0.3s and a restart is ~100s of evals/maxiter, so
+# MAXITER=50 is ~25min (fits 1h). The POLISH does the final accurate
+# convergence at full N_SIM, so coarse restarts here are by design.
+MAXITER="${MAXITER:-50}"
 # Budget for the final POLISH local search. Runs on the stable coordinator,
 # but still at full n_sim, so it is NOT free: at n_sim=100k, ~250 is a few hours
 # (fits the 1-day coordinator); 1000 would be tens of hours and never finish.
@@ -92,7 +96,7 @@ ACCT_FLAG=""
 echo "Submitting preemptible scavenge run:"
 echo "  coordinator: partition=$PARTITION cores=$COORD_CORES walltime=$COORD_WALLTIME mem=$COORD_MEM"
 echo "  workers:     partition=$WPARTITION array=0-$((NWORKERS-1))%$MAXPAR cores/task=$WCORES walltime=$WWALLTIME mem=$WMEM"
-echo "  workload:    n_sim=$N_SIM n_sobol=$N_SOBOL keep_best=$KEEP_BEST maxiter=$MAXITER polish=$MAXITER_POLISH lease_ttl=$LEASE_TTL fresh=$FRESH"
+echo "  workload:    n_sim=$N_SIM screen=$N_SIM_SCREEN n_sobol=$N_SOBOL keep_best=$KEEP_BEST maxiter=$MAXITER polish=$MAXITER_POLISH lease_ttl=$LEASE_TTL fresh=$FRESH"
 echo "  account:     ${ACCOUNT:-<default>}"
 echo "  workdir:     $WORKDIR  (must be on a shared filesystem)"
 
@@ -106,6 +110,6 @@ exec sbatch \
     --time="$COORD_WALLTIME" \
     --mem="$COORD_MEM" \
     $ACCT_FLAG \
-    --export=ALL,WORKDIR="$WORKDIR",N_SIM="$N_SIM",N_SOBOL="$N_SOBOL",KEEP_BEST="$KEEP_BEST",MAXITER="$MAXITER",MAXITER_POLISH="$MAXITER_POLISH",SEED="$SEED",SOBOL_SEED="$SOBOL_SEED",LEASE_TTL="$LEASE_TTL",FREE="$FREE",FRESH="$FRESH",ACCOUNT="$ACCOUNT",WPARTITION="$WPARTITION",NWORKERS="$NWORKERS",MAXPAR="$MAXPAR",WCORES="$WCORES",WWALLTIME="$WWALLTIME",WMEM="$WMEM" \
+    --export=ALL,WORKDIR="$WORKDIR",N_SIM="$N_SIM",N_SIM_SCREEN="$N_SIM_SCREEN",N_SOBOL="$N_SOBOL",KEEP_BEST="$KEEP_BEST",MAXITER="$MAXITER",MAXITER_POLISH="$MAXITER_POLISH",SEED="$SEED",SOBOL_SEED="$SOBOL_SEED",LEASE_TTL="$LEASE_TTL",FREE="$FREE",FRESH="$FRESH",ACCOUNT="$ACCOUNT",WPARTITION="$WPARTITION",NWORKERS="$NWORKERS",MAXPAR="$MAXPAR",WCORES="$WCORES",WWALLTIME="$WWALLTIME",WMEM="$WMEM" \
     "$@" \
     code/runs/hpc_coordinator.sh

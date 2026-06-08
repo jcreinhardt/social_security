@@ -542,12 +542,17 @@ def _stage_polish(coord, objective, bounds, cfg, wid):
             #         to poll-call this); polish from the final global best.
         rb = coord.read_best()
         if rb is None:
-            starts = np.load(coord._p("x_starts.npy"))
-            rb = (starts[0], float("inf"))
-        best_x, best_f = local_search(objective, rb[0], bounds, cfg,
+            x0, f0 = np.load(coord._p("x_starts.npy"))[0], float("inf")
+        else:
+            # Re-evaluate the incumbent at THIS (polish) fidelity: under
+            # multi-fidelity rb[1] is a screen-n_sim value, not comparable to
+            # the full-n_sim polish objective below.
+            x0 = rb[0]
+            f0 = objective(x0)
+        best_x, best_f = local_search(objective, x0, bounds, cfg,
                                       maxiter=cfg.maxiter_polish)
-        if not (np.isfinite(best_f) and best_f <= rb[1]):
-            best_x, best_f = rb[0], rb[1]
+        if not (np.isfinite(best_f) and best_f <= f0):
+            best_x, best_f = x0, f0
         coord._write_json(coord._p("final_result.json"),
                           {"x": list(map(float, best_x)), "f": float(best_f)})
         print(f"[worker {wid}] polish done, final f={best_f:.6e}", flush=True)
@@ -571,10 +576,15 @@ def wait_for_init(coord, timeout=DEFAULT_TIMEOUT):
         time.sleep(POLL_SLEEP)
 
 
-def run_worker(coord, objective, bounds, cfg, wid=0, elect=True):
+def run_worker(coord, objective, bounds, cfg, wid=0, elect=True,
+               objective_polish=None):
     """Run one TikTak worker process to completion against the shared run
     directory ``coord``. ``objective(x)`` is the scalar objective over the free
     parameters; ``bounds`` is a (d,2) array.
+
+    ``objective_polish``: optional separate (full-fidelity) objective used only
+    for the final POLISH; ``objective`` then drives the cheaper Sobol screen and
+    local restarts (multi-fidelity). Defaults to ``objective`` (single fidelity).
 
     ``elect``: if True this process may become the init leader when the run is
     uninitialized (single-node ``--spawn`` and the coordinator). Scavenge array
@@ -582,6 +592,8 @@ def run_worker(coord, objective, bounds, cfg, wid=0, elect=True):
     A worker that catches a preemption signal (``_STOP``) returns early, leaving
     its in-flight task to be reclaimed by a survivor."""
     bounds = np.asarray(bounds, float)
+    if objective_polish is None:
+        objective_polish = objective
     _install_signal_handlers()
 
     # 1. INIT
@@ -608,9 +620,9 @@ def run_worker(coord, objective, bounds, cfg, wid=0, elect=True):
     if _STOP:
         return
 
-    # 5. POLISH (whoever gets the lock first does it)
+    # 5. POLISH (whoever gets the lock first does it) -- at full fidelity
     if coord.get_state() == LOCAL_SEARCH:
-        _stage_polish(coord, objective, bounds, cfg, wid)
+        _stage_polish(coord, objective_polish, bounds, cfg, wid)
     coord.wait_state(DONE)
 
 
