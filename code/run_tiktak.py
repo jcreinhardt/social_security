@@ -200,7 +200,7 @@ def run_one_worker(args):
         record_guvenen_objective(coord, objective_polish, prob)
 
     run_worker(coord, objective, prob.FREE_BOUNDS, cfg, wid=wid, elect=elect,
-               objective_polish=objective_polish)
+               objective_polish=objective_polish, search_box=prob.FREE_RANGE)
 
     if is_auto_lead:
         aggregate_and_report(coord, cfg, prob)
@@ -323,7 +323,8 @@ def run_coordinator(args):
 
     # Initialize the run (draw the Sobol set, open EVAL_SOBOL) if not already.
     if coord.get_state() is None:
-        _try_become_leader(coord, objective, bounds, cfg)
+        _try_become_leader(coord, objective, bounds, cfg,
+                           search_box=prob.FREE_RANGE)
     print(f"[coordinator] run state: {coord.get_state()}", flush=True)
     print(f"[coordinator] monitor live with:  "
           f"python code/monitor.py {workdir}", flush=True)

@@ -8,7 +8,7 @@ public API so existing imports — ``from msm_model import simulate_income, ...`
 instead (e.g. ``from moments import calculate_moments``).
 """
 
-from params import PARAM_NAMES, THETA_TRUE, PARAM_BOUNDS
+from params import PARAM_NAMES, THETA_TRUE, PARAM_BOUNDS, PARAM_RANGE
 from config import MSMConfig
 from dgp import (
     Shocks, draw_shocks, get_shocks, simulate_income,
@@ -30,7 +30,7 @@ from targets import (
 )
 
 __all__ = [
-    "PARAM_NAMES", "THETA_TRUE", "PARAM_BOUNDS", "MSMConfig",
+    "PARAM_NAMES", "THETA_TRUE", "PARAM_BOUNDS", "PARAM_RANGE", "MSMConfig",
     "Shocks", "draw_shocks", "get_shocks", "simulate_income",
     "calculate_moments", "flatten_moments",
     "NVASEINC", "NVASEMNT", "NIRINC", "NIRCHG", "NLAG", "NLTINCPCT", "LTH",

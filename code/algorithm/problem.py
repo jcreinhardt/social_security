@@ -17,7 +17,7 @@ would (FREE_NAMES, FREE_BOUNDS, ...), so callers can treat it interchangeably.
 import numpy as np
 
 from msm_model import (
-    PARAM_NAMES, PARAM_BOUNDS, THETA_TRUE,
+    PARAM_NAMES, PARAM_BOUNDS, PARAM_RANGE, THETA_TRUE,
     simulate_income, calculate_moments, flatten_moments,
     build_weight_and_psi, deviation_F, synthetic_target_moments,
     load_target_moments, load_ir_data_full, impulse_response_F, get_shocks,
@@ -46,6 +46,10 @@ class Problem:
         self.FREE_NAMES, self.FREE_IDXS = resolve_free(free)
         self.N_FREE = len(self.FREE_IDXS)
         self.FREE_BOUNDS = np.array([PARAM_BOUNDS[i] for i in self.FREE_IDXS])
+        # Tighter, economically-informed SEARCH box for the Sobol screen (the
+        # local search still refines within FREE_BOUNDS). Mirrors Guvenen's
+        # param_range vs param_bound two-box design.
+        self.FREE_RANGE = np.array([PARAM_RANGE[i] for i in self.FREE_IDXS])
         self.FREE_TRUE = np.array([THETA_TRUE[i] for i in self.FREE_IDXS])
 
     def build_full_theta(self, x):

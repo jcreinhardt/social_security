@@ -390,15 +390,21 @@ def local_search(objective, x_start, bounds, cfg, maxiter=None, on_step=None):
 # Stages
 # ============================================================================
 
-def _try_become_leader(coord, objective, bounds, cfg):
+def _try_become_leader(coord, objective, bounds, cfg, search_box=None):
     """First process to grab the init lock and find no `initialized` flag
     becomes leader: it draws the Sobol set and opens EVAL_SOBOL. Returns True
-    if this process is the leader."""
+    if this process is the leader.
+
+    ``search_box``: optional (d,2) box the Sobol screen is drawn within (Guvenen's
+    tighter ``param_range``); defaults to ``bounds`` (the hard feasibility box).
+    The local search always refines within ``bounds``, so a point can still move
+    out of the narrower search box."""
     with Locked(coord._p("init.lock")):
         if os.path.exists(coord._p("initialized")):
             return False
-        lo, hi = bounds[:, 0], bounds[:, 1]
-        d = bounds.shape[0]
+        box = bounds if search_box is None else np.asarray(search_box, float)
+        lo, hi = box[:, 0], box[:, 1]
+        d = box.shape[0]
         sampler = qmc.Sobol(d=d, scramble=True, seed=cfg.sobol_seed)
         m_pow2 = int(np.ceil(np.log2(cfg.sobol_draws)))
         u = sampler.random_base2(m=m_pow2)[:cfg.sobol_draws]
@@ -577,7 +583,7 @@ def wait_for_init(coord, timeout=DEFAULT_TIMEOUT):
 
 
 def run_worker(coord, objective, bounds, cfg, wid=0, elect=True,
-               objective_polish=None):
+               objective_polish=None, search_box=None):
     """Run one TikTak worker process to completion against the shared run
     directory ``coord``. ``objective(x)`` is the scalar objective over the free
     parameters; ``bounds`` is a (d,2) array.
@@ -598,7 +604,7 @@ def run_worker(coord, objective, bounds, cfg, wid=0, elect=True,
 
     # 1. INIT
     if elect and coord.get_state() is None:
-        _try_become_leader(coord, objective, bounds, cfg)
+        _try_become_leader(coord, objective, bounds, cfg, search_box=search_box)
     wait_for_init(coord)
     if coord.get_state() == DONE:
         return
