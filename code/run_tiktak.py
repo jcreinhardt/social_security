@@ -243,9 +243,13 @@ def spawn_workers(args):
     procs = []
 
     # Forward a preemption signal (SLURM --signal) to the children so each can
-    # finish its current task, drop its lease, and exit cleanly for a fast,
-    # low-waste requeue. (The lease TTL reaper recovers the work regardless.)
+    # finish its current task and drop its lease before dying. We record the
+    # signal so the parent can ITSELF die by it below (rather than exiting 0).
+    # (The lease TTL reaper recovers any in-flight work regardless.)
+    _preempt = {"sig": None}
+
     def _forward(signum, frame):
+        _preempt["sig"] = signum
         for p in procs:
             try:
                 p.send_signal(signal.SIGTERM)
@@ -264,6 +268,20 @@ def spawn_workers(args):
     rc = 0
     for p in procs:
         rc |= p.wait()
+
+    # If SLURM signalled us (scavenge preemption), the children have already
+    # dropped their leases and exited. We must NOT exit 0: a voluntary clean
+    # exit is recorded COMPLETED and is NOT requeued, so the worker array would
+    # only ever shrink. Re-raise the same signal to die by it -- a signalled
+    # termination is requeue-eligible, so SLURM --requeue brings this task back
+    # and it rejoins the run.
+    if _preempt["sig"] is not None:
+        sig = _preempt["sig"]
+        print(f"[parent] preemption signal {sig}; re-raising for a "
+              f"requeue-eligible exit", flush=True)
+        signal.signal(sig, signal.SIG_DFL)
+        os.kill(os.getpid(), sig)
+        sys.exit(128 + sig)  # fallback if the signal does not terminate us
     if rc != 0:
         print(f"[parent] a worker exited non-zero (rc bitmask={rc})", flush=True)
         sys.exit(1)
@@ -271,12 +289,15 @@ def spawn_workers(args):
 
 # ── Coordinator (stable partition): init + babysit + aggregate ──────────────
 
-def _submit_array(submit_cmd):
-    """Run the env-provided sbatch command for the scavenge worker array and
-    return its job id (parses both `--parsable` and the normal 'Submitted batch
-    job <id>' forms). Returns None on failure."""
+def _submit_array(submit_cmd, n, maxpar):
+    """Submit the scavenge worker array sized to ``n`` tasks (at most ``maxpar``
+    running at once) and return its job id. The ``--array`` spec is appended
+    here so the coordinator can size each (re)submission to the current deficit.
+    Parses both `--parsable` and the normal 'Submitted batch job <id>' forms;
+    returns None on failure."""
     import shlex
-    out = subprocess.run(shlex.split(submit_cmd), capture_output=True, text=True)
+    cmd = shlex.split(submit_cmd) + [f"--array=0-{n - 1}%{maxpar}"]
+    out = subprocess.run(cmd, capture_output=True, text=True)
     if out.returncode != 0:
         print(f"[coordinator] array submit failed: {out.stderr.strip()}",
               flush=True)
@@ -285,13 +306,17 @@ def _submit_array(submit_cmd):
     return s.split(";")[0].split()[-1] if s else None
 
 
-def _array_alive(jobid):
-    """True if the array job still has any pending/running task in the queue."""
+def _array_alive_count(jobid):
+    """Number of pending+running tasks of ``jobid`` still in the queue (0 if
+    none / unknown). A requeued (preempted) task is still counted -- it sits
+    PENDING and will rerun -- so this measures live worker width."""
     if not jobid:
-        return False
+        return 0
     out = subprocess.run(["squeue", "-j", str(jobid), "-h", "-o", "%i"],
                          capture_output=True, text=True)
-    return out.returncode == 0 and out.stdout.strip() != ""
+    if out.returncode != 0:
+        return 0
+    return sum(1 for line in out.stdout.splitlines() if line.strip())
 
 
 def run_coordinator(args):
@@ -330,11 +355,18 @@ def run_coordinator(args):
           f"python code/monitor.py {workdir}", flush=True)
 
     submit_cmd = os.environ.get("WORKER_SUBMIT_CMD", "").strip()
-    array_jobid = None
-    if submit_cmd:
-        array_jobid = _submit_array(submit_cmd)
-        print(f"[coordinator] submitted scavenge worker array: {array_jobid}",
-              flush=True)
+    target = int(os.environ.get("WORKER_ARRAY_TARGET", "0") or 0)
+    maxpar = int(os.environ.get("WORKER_ARRAY_MAXPAR", "0") or target or 1)
+    array_jobids = []
+    if submit_cmd and target > 0:
+        jid = _submit_array(submit_cmd, target, maxpar)
+        if jid:
+            array_jobids.append(jid)
+        print(f"[coordinator] submitted scavenge worker array: {jid} "
+              f"(target={target} tasks, maxpar={maxpar})", flush=True)
+    elif submit_cmd:
+        print("[coordinator] WORKER_ARRAY_TARGET unset/0; not managing worker "
+              "array width.", flush=True)
     else:
         print("[coordinator] WORKER_SUBMIT_CMD unset; not managing a worker "
               "array (launch workers separately).", flush=True)
@@ -348,11 +380,24 @@ def run_coordinator(args):
             _stage_select(coord, cfg, wid=-1)
         if coord.get_state() == LOCAL_SEARCH:
             _stage_polish(coord, objective, bounds, cfg, wid=-1)
-        # Keep the scavenge array alive: resubmit if it has fully drained.
-        if submit_cmd and coord.get_state() != DONE and not _array_alive(array_jobid):
-            array_jobid = _submit_array(submit_cmd)
-            print(f"[coordinator] scavenge array drained; resubmitted: "
-                  f"{array_jobid}", flush=True)
+        # Keep the scavenge array at full WIDTH. Preempted tasks self-heal via
+        # --requeue (so they still count as alive); this tops up the DEFICIT
+        # left by tasks that terminally ended (walltime TIMEOUT) or failed to
+        # requeue. Sizing each refill to the deficit -- not resubmitting the
+        # whole array -- avoids over-provisioning, and just-submitted tasks show
+        # up PENDING immediately so they are counted next tick (no double-fill).
+        if submit_cmd and target > 0 and coord.get_state() != DONE:
+            array_jobids = [j for j in array_jobids
+                            if _array_alive_count(j) > 0]
+            alive = sum(_array_alive_count(j) for j in array_jobids)
+            deficit = target - alive
+            if deficit > 0:
+                jid = _submit_array(submit_cmd, deficit, min(maxpar, deficit))
+                if jid:
+                    array_jobids.append(jid)
+                    print(f"[coordinator] topped up scavenge array: +{deficit} "
+                          f"tasks ({jid}); was {alive}/{target} alive",
+                          flush=True)
         if coord.get_state() == DONE:
             break
         time.sleep(cfg.babysit_interval)

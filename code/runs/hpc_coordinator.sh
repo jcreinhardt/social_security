@@ -57,13 +57,18 @@ if [ ! -f "$DATA/intermediate/var_lny.dat" ]; then
 fi
 
 # The command the coordinator runs to (re)submit the scavenge worker array.
-# --export=ALL propagates THIS job's environment (WORKDIR + all workload knobs)
-# to the array tasks, so the worker script reads them straight from its env.
-# No commas in this string -> no SLURM --export parsing trouble. Charge the array
-# to the same account as the coordinator (so the whole run bills one budget).
+# The coordinator APPENDS the `--array=0-(n-1)%maxpar` spec itself, sizing each
+# (re)submission to the current deficit between WORKER_ARRAY_TARGET and the live
+# task count -- so it keeps the array at full width as tasks expire or fail to
+# requeue, without over-provisioning. --export=ALL propagates THIS job's
+# environment (WORKDIR + all workload knobs) to the array tasks. No commas in
+# the command string -> no SLURM --export parsing trouble. Charge the array to
+# the same account as the coordinator (so the whole run bills one budget).
 ACCT_FLAG=""
 [ -n "$ACCOUNT" ] && ACCT_FLAG="--account=$ACCOUNT "
-export WORKER_SUBMIT_CMD="sbatch --parsable --partition=$WPARTITION --nodes=1 --ntasks=1 --cpus-per-task=$WCORES --array=0-$((NWORKERS-1))%$MAXPAR --time=$WWALLTIME --mem=$WMEM --requeue --signal=B:TERM@90 ${ACCT_FLAG}--export=ALL $ROOT/code/runs/hpc_workers_scavenge.sh"
+export WORKER_SUBMIT_CMD="sbatch --parsable --partition=$WPARTITION --nodes=1 --ntasks=1 --cpus-per-task=$WCORES --time=$WWALLTIME --mem=$WMEM --requeue --signal=B:TERM@90 ${ACCT_FLAG}--export=ALL $ROOT/code/runs/hpc_workers_scavenge.sh"
+export WORKER_ARRAY_TARGET="$NWORKERS"   # target number of live array tasks
+export WORKER_ARRAY_MAXPAR="$MAXPAR"     # max running at once (per submission)
 
 FRESH_FLAG=""
 [ "$FRESH" = "1" ] && FRESH_FLAG="--fresh"
