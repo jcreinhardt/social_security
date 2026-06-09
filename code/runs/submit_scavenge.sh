@@ -15,8 +15,8 @@
 #                         that pull tasks, heartbeat a lease, and on preemption
 #                         leave their in-flight task to be reclaimed.
 #
-# Defaults (128 array tasks x 4 cores = 512 scavenge cores, 1h tasks; reduced-
-# Guvenen workload n_sim=100k, 2^16 Sobol, 1000 restarts). Small short tasks
+# Defaults (256 array tasks x 4 cores = 1024 scavenge cores ~= KEEP_BEST, 1h
+# tasks; Guvenen workload n_sim=100k all-stages, 2^16 Sobol, 1000 restarts). Small short tasks
 # schedule easily on scavenge -- a node free for an hour can take one -- and the
 # coordinator resubmits the array as tasks expire, so progress accumulates:
 #     ACCOUNT=pi_johng code/runs/submit_scavenge.sh
@@ -46,27 +46,39 @@ COORD_MEM="${COORD_MEM:-8G}"
 
 # ---- worker array (scavenge) resources ------------------------------------
 WPARTITION="${WPARTITION:-scavenge}"     # preemptible partition for the workers
-NWORKERS="${NWORKERS:-128}"              # number of array tasks (nodes)
+NWORKERS="${NWORKERS:-256}"              # number of array tasks (nodes)
 MAXPAR="${MAXPAR:-$NWORKERS}"            # max array tasks running at once
 WCORES="${WCORES:-4}"                    # worker processes per array task
+# 256 x 4 = 1024 worker processes ~= KEEP_BEST (1000 local restarts), the useful-
+# core ceiling: the local stage has only KEEP_BEST independent restarts, so >~1000
+# cores idle during it. The slight excess over 1000 absorbs the reaper's redo of
+# preempted restarts and the straggler tail. Use small (4-core) tasks so a free
+# scavenge slot can take one. To go higher, raise KEEP_BEST (more restarts), not cores.
 WWALLTIME="${WWALLTIME:-1:00:00}"        # short tasks -> easy to schedule on scavenge
 WMEM="${WMEM:-12G}"                      # WCORES x ~2 GB at n_sim=100k
 
 # ---- workload knobs (shared) ----------------------------------------------
-N_SIM="${N_SIM:-100000}"                  # full fidelity (the final POLISH + reported estimate)
-# Multi-fidelity: the Sobol screen + local restarts run at this cheaper n_sim
-# (they only need to rank/explore basins); the polish runs at the full N_SIM.
-# At ~30k an eval is ~3x cheaper than at 100k, so restarts fit a 1h worker with
-# a useful MAXITER. Set =N_SIM (or 0) to disable.
-N_SIM_SCREEN="${N_SIM_SCREEN:-30000}"
+N_SIM="${N_SIM:-100000}"                  # full fidelity (EVERY stage; see below)
+# Multi-fidelity is DISABLED (N_SIM_SCREEN=0): the Sobol screen AND the local
+# restarts run at the full N_SIM, not a cheaper screen n_sim. We turned it off
+# because at a reduced screen n_sim the per-eval simulation noise (~0.02 at 30k)
+# exceeded the real spread between optima (~0.005), so the local search overfit
+# the screen CRN draw -- it reported a fat-tailed shock mixture that "beat"
+# Guvenen at 30k/seed-42 but lost to him at full 100k on every seed tried.
+# Running all stages at 100k removes that. Set >0 and <N_SIM to re-enable.
+N_SIM_SCREEN="${N_SIM_SCREEN:-0}"
 N_SOBOL="${N_SOBOL:-65536}"
 KEEP_BEST="${KEEP_BEST:-1000}"
 # Per-restart budget for the LOCAL_SEARCH stage. Must be small enough that one
-# 21-dim Powell restart finishes well inside a worker's WWALLTIME. At the screen
-# n_sim=30k an eval is ~0.3s and a restart is ~100s of evals/maxiter, so
-# MAXITER=50 is ~25min (fits 1h). The POLISH does the final accurate
-# convergence at full N_SIM, so coarse restarts here are by design.
-MAXITER="${MAXITER:-50}"
+# 21-dim Powell restart finishes well inside a worker's WWALLTIME -- a restart is
+# a single scipy.minimize with NO mid-run checkpoint, so a restart that cannot
+# complete within a worker's life is killed and redone from scratch forever, and
+# the stage stalls. Now that restarts run at the full n_sim=100k (~0.9s/eval,
+# ~100 evals per MAXITER unit), MAXITER=30 is ~45min and fits the 1h WWALLTIME
+# with margin -- MAXITER=50 would be ~75min and NEVER finish in a 1h worker. The
+# POLISH does the final accurate convergence at full N_SIM, so coarse restarts
+# here are by design. To use MAXITER=50, raise WWALLTIME to >=2h instead.
+MAXITER="${MAXITER:-30}"
 # Budget for the final POLISH local search. Runs on the stable coordinator,
 # but still at full n_sim, so it is NOT free: at n_sim=100k, ~250 is a few hours
 # (fits the 1-day coordinator); 1000 would be tens of hours and never finish.
