@@ -38,6 +38,7 @@ LEASE_TTL="${LEASE_TTL:-600}"
 FREE="${FREE:-all}"
 FRESH="${FRESH:-0}"
 DATA="${DATA:-$ROOT/data}"        # real Guvenen moments in $DATA/intermediate/*.dat
+GENDER="${GENDER:-}"              # men|women -> single-sex GKOS targets; empty -> real .dat
 
 # ---- scavenge worker array (resources only; workload knobs inherited) ------
 WPARTITION="${WPARTITION:-scavenge}"
@@ -51,9 +52,20 @@ ACCOUNT="${ACCOUNT:-}"             # SLURM account to charge the worker array to
 source "$ROOT/code/benchmarking/_scaling_lib.sh"
 setup_env
 
-if [ ! -f "$DATA/intermediate/var_lny.dat" ]; then
-    echo "ERROR: real moments not found in $DATA/intermediate/ (need the .dat files)." >&2
-    exit 1
+if [ -n "$GENDER" ]; then
+    TARGET_FLAGS="--gender $GENDER --gender-data $DATA"
+    if [ ! -f "$DATA/gender_targets/${GENDER}.npz" ] \
+       && [ ! -f "$DATA/GKOS_2016_moments_${GENDER}.xlsx" ]; then
+        echo "ERROR: no targets for '$GENDER' under $DATA (need gender_targets/${GENDER}.npz" >&2
+        echo "  or GKOS_2016_moments_${GENDER}.xlsx). Run code/freeze_gender_targets.py locally." >&2
+        exit 1
+    fi
+else
+    TARGET_FLAGS="--real-moments $DATA"
+    if [ ! -f "$DATA/intermediate/var_lny.dat" ]; then
+        echo "ERROR: real moments not found in $DATA/intermediate/ (need the .dat files)." >&2
+        exit 1
+    fi
 fi
 
 # The command the coordinator runs to (re)submit the scavenge worker array.
@@ -92,12 +104,19 @@ python code/run_tiktak.py \
     --seed "$SEED" \
     --sobol-seed "$SOBOL_SEED" \
     --lease-ttl "$LEASE_TTL" \
-    --real-moments "$DATA" \
+    $TARGET_FLAGS \
     --workdir "$WORKDIR"
 
-echo
-echo "Producing comparison + objective-slice figures ..."
-( cd code && python plot_results.py "$WORKDIR" --real-moments "$DATA" )
-
-echo
-echo "Done. See $WORKDIR/ : final_results.json, params_vs_guvenen.png, objective_slices.png"
+# plot_results.py compares against the full .dat moment set, so it only applies
+# to a real-moments run; skip it for a single-sex (gender) run.
+if [ -z "$GENDER" ]; then
+    echo
+    echo "Producing comparison + objective-slice figures ..."
+    ( cd code && python plot_results.py "$WORKDIR" --real-moments "$DATA" )
+    echo
+    echo "Done. See $WORKDIR/ : final_results.json, params_vs_guvenen.png, objective_slices.png"
+else
+    echo
+    echo "Done. See $WORKDIR/final_results.json"
+    echo "Compare both sexes vs Guvenen:  python code/compare_gender_estimates.py"
+fi

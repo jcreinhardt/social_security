@@ -87,6 +87,7 @@ SEED="${SEED:-42}"
 SOBOL_SEED="${SOBOL_SEED:-999}"
 LEASE_TTL="${LEASE_TTL:-600}"
 FREE="${FREE:-all}"
+GENDER="${GENDER:-}"                     # men|women -> single-sex GKOS targets; empty -> full real .dat
 FRESH="${FRESH:-0}"                      # 1 -> coordinator wipes + restarts
 ACCOUNT="${ACCOUNT:-}"                   # SLURM account to charge (e.g. johng); applies
                                          # to BOTH the coordinator and the worker array
@@ -98,8 +99,13 @@ cd "$ROOT"
 
 # Absolute, shared-filesystem run directory used by EVERY job. A fresh name
 # (vs a prior run with different N_SOBOL/KEEP_BEST) avoids re-attaching to stale
-# init state and the slow wipe of the old dir's many small files.
-WORKDIR="${WORKDIR:-$ROOT/output/run_scavenge_4c}"
+# init state and the slow wipe of the old dir's many small files. A single-sex
+# (gender) run gets its own per-sex dir so men/women don't share state.
+if [ -n "$GENDER" ]; then
+    WORKDIR="${WORKDIR:-$ROOT/output/run_scavenge_gender_$GENDER}"
+else
+    WORKDIR="${WORKDIR:-$ROOT/output/run_scavenge_4c}"
+fi
 
 # Charge both jobs to a specific account if one is given (empty -> your default).
 ACCT_FLAG=""
@@ -109,6 +115,7 @@ echo "Submitting preemptible scavenge run:"
 echo "  coordinator: partition=$PARTITION cores=$COORD_CORES walltime=$COORD_WALLTIME mem=$COORD_MEM"
 echo "  workers:     partition=$WPARTITION array=0-$((NWORKERS-1))%$MAXPAR cores/task=$WCORES walltime=$WWALLTIME mem=$WMEM"
 echo "  workload:    n_sim=$N_SIM screen=$N_SIM_SCREEN n_sobol=$N_SOBOL keep_best=$KEEP_BEST maxiter=$MAXITER polish=$MAXITER_POLISH lease_ttl=$LEASE_TTL fresh=$FRESH"
+echo "  targets:     ${GENDER:+gender=$GENDER (GKOS workbook subset)}${GENDER:-real .dat moments}"
 echo "  account:     ${ACCOUNT:-<default>}"
 echo "  workdir:     $WORKDIR  (must be on a shared filesystem)"
 
@@ -122,6 +129,6 @@ exec sbatch \
     --time="$COORD_WALLTIME" \
     --mem="$COORD_MEM" \
     $ACCT_FLAG \
-    --export=ALL,WORKDIR="$WORKDIR",N_SIM="$N_SIM",N_SIM_SCREEN="$N_SIM_SCREEN",N_SOBOL="$N_SOBOL",KEEP_BEST="$KEEP_BEST",MAXITER="$MAXITER",MAXITER_POLISH="$MAXITER_POLISH",SEED="$SEED",SOBOL_SEED="$SOBOL_SEED",LEASE_TTL="$LEASE_TTL",FREE="$FREE",FRESH="$FRESH",ACCOUNT="$ACCOUNT",WPARTITION="$WPARTITION",NWORKERS="$NWORKERS",MAXPAR="$MAXPAR",WCORES="$WCORES",WWALLTIME="$WWALLTIME",WMEM="$WMEM" \
+    --export=ALL,WORKDIR="$WORKDIR",N_SIM="$N_SIM",N_SIM_SCREEN="$N_SIM_SCREEN",N_SOBOL="$N_SOBOL",KEEP_BEST="$KEEP_BEST",MAXITER="$MAXITER",MAXITER_POLISH="$MAXITER_POLISH",SEED="$SEED",SOBOL_SEED="$SOBOL_SEED",LEASE_TTL="$LEASE_TTL",FREE="$FREE",GENDER="$GENDER",FRESH="$FRESH",ACCOUNT="$ACCOUNT",WPARTITION="$WPARTITION",NWORKERS="$NWORKERS",MAXPAR="$MAXPAR",WCORES="$WCORES",WWALLTIME="$WWALLTIME",WMEM="$WMEM" \
     "$@" \
     code/runs/hpc_coordinator.sh

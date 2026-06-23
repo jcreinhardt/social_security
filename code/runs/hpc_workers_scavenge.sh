@@ -40,8 +40,16 @@ SOBOL_SEED="${SOBOL_SEED:-999}"
 LEASE_TTL="${LEASE_TTL:-600}"
 FREE="${FREE:-all}"
 DATA="${DATA:-$ROOT/data}"
+GENDER="${GENDER:-}"              # men|women -> single-sex GKOS targets; empty -> real .dat
 WCORES="${SLURM_CPUS_PER_TASK:-8}"
 ATASK="${SLURM_ARRAY_TASK_ID:-0}"
+
+# Target source: single-sex workbook moments (--gender) or the full real .dat set.
+if [ -n "$GENDER" ]; then
+    TARGET_FLAGS="--gender $GENDER --gender-data $DATA"
+else
+    TARGET_FLAGS="--real-moments $DATA"
+fi
 
 source "$ROOT/code/benchmarking/_scaling_lib.sh"
 setup_env
@@ -68,7 +76,7 @@ python code/run_tiktak.py \
     --seed "$SEED" \
     --sobol-seed "$SOBOL_SEED" \
     --lease-ttl "$LEASE_TTL" \
-    --real-moments "$DATA" \
+    $TARGET_FLAGS \
     --workdir "$WORKDIR" &
 PYPID=$!
 trap 'kill -TERM "$PYPID" 2>/dev/null || true' TERM USR1
