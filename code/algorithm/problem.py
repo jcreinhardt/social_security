@@ -22,6 +22,7 @@ from msm_model import (
     build_weight_and_psi, deviation_F, synthetic_target_moments,
     load_target_moments, load_ir_data_full, impulse_response_F, get_shocks,
 )
+from gender_targets import build_gender_target
 
 ALL = "all"
 
@@ -42,7 +43,12 @@ def resolve_free(free):
 
 
 class Problem:
-    def __init__(self, free=None):
+    def __init__(self, free=None, gender=None, gender_data="data"):
+        # When ``gender`` is 'men'/'women', the target is built from the GKOS
+        # workbook for that sex over the common moment subset (SSK + incgrwth),
+        # overriding any --real-moments .dat path. See gender_targets.py.
+        self.GENDER = gender
+        self.GENDER_DATA = gender_data
         self.FREE_NAMES, self.FREE_IDXS = resolve_free(free)
         self.N_FREE = len(self.FREE_IDXS)
         self.FREE_BOUNDS = np.array([PARAM_BOUNDS[i] for i in self.FREE_IDXS])
@@ -67,6 +73,12 @@ class Problem:
         interpolate the impulse target to the simulated change, Guvenen-style),
         or None for synthetic targets (which are themselves on the simulation
         grid, so the impulse block uses the static target for exact recovery)."""
+        if self.GENDER is not None:
+            # Single-sex run: targets from the GKOS workbook, reduced moment set,
+            # custom block weights. No impulse interpolation (block dropped).
+            m_target, slices, w_diag, psi = build_gender_target(
+                self.GENDER, self.GENDER_DATA)
+            return m_target, slices, w_diag, psi, None
         if real_data_path is not None:
             m_target, slices = load_target_moments(real_data_path)
             ir_data = load_ir_data_full(real_data_path)

@@ -174,7 +174,7 @@ def write_run_meta(coord, cfg, prob):
 
 def run_one_worker(args):
     cfg = build_cfg(args)
-    prob = Problem(args.free)
+    prob = Problem(args.free, gender=args.gender, gender_data=args.gender_data)
     coord = FileCoordinator(args.workdir)
     real_path = args.real_moments if args.real_moments else None
 
@@ -189,8 +189,10 @@ def run_one_worker(args):
     if is_auto_lead:
         write_run_meta(coord, cfg, prob)
         screen = cfg.n_sim_screen if (0 < cfg.n_sim_screen < cfg.n_sim) else cfg.n_sim
+        tgt = (f"gender:{args.gender}" if args.gender
+               else ("real" if real_path else "synthetic"))
         print(f"[worker 0] building objective "
-              f"({'real' if real_path else 'synthetic'} targets, "
+              f"({tgt} targets, "
               f"{prob.N_FREE} free params, screen n_sim={screen}, "
               f"polish n_sim={cfg.n_sim}) ...", flush=True)
         print(f"[worker 0] monitor live with:  "
@@ -237,6 +239,8 @@ def spawn_workers(args):
     ]
     if args.real_moments:
         passthrough += ["--real-moments", args.real_moments]
+    if args.gender:
+        passthrough += ["--gender", args.gender, "--gender-data", args.gender_data]
 
     print(f"Spawning {n} worker process(es) (role={args.role}) on workdir "
           f"{args.workdir}", flush=True)
@@ -334,13 +338,15 @@ def run_coordinator(args):
         shutil.rmtree(workdir)
 
     cfg = build_cfg(args)
-    prob = Problem(args.free)
+    prob = Problem(args.free, gender=args.gender, gender_data=args.gender_data)
     coord = FileCoordinator(workdir)
     real_path = args.real_moments if args.real_moments else None
 
     write_run_meta(coord, cfg, prob)
+    tgt = (f"gender:{args.gender}" if args.gender
+           else ("real" if real_path else "synthetic"))
     print(f"[coordinator] building objective "
-          f"({'real' if real_path else 'synthetic'} targets, "
+          f"({tgt} targets, "
           f"{prob.N_FREE} free params, n_sim={cfg.n_sim}) ...", flush=True)
     objective = prob.make_objective(cfg, real_data_path=real_path)
     bounds = prob.FREE_BOUNDS
@@ -473,6 +479,12 @@ def main():
     ap.add_argument("--real-moments", default=None,
                     help="path to a data dir with intermediate/*.dat; if set, "
                          "estimate against real moments instead of synthetic")
+    ap.add_argument("--gender", choices=("men", "women"), default=None,
+                    help="estimate against a single sex's GKOS workbook moments "
+                         "(common subset: SSK_L1+SSK_L5+incgrwth). Overrides "
+                         "--real-moments. See algorithm/gender_targets.py")
+    ap.add_argument("--gender-data", default="data",
+                    help="dir holding GKOS_2016_moments_{men,women}.xlsx")
     args = ap.parse_args()
 
     if args.workdir is None:

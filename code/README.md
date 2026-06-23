@@ -334,6 +334,52 @@ The defaults are a sensible first solve, not Guvenen's full budget (900k Sobol /
 thorough global search. 21-D local searches are far more expensive than 2-D, so
 expect this to run for hours.
 
+### Single-sex (men / women) estimation
+Estimate the model **separately for men and women** against the published GKOS
+2016 moment workbooks (`data/GKOS_2016_moments_{men,women}.xlsx`), targeting only
+the moment blocks the two workbooks **share** and that map cleanly onto our
+estimation grid: `SdSkewKurt_L1 + SdSkewKurt_L5 + incgrwth` (354 moments,
+reweighted SSK 2/3 + incgrwth 1/3). Dropped: `var_lny` (absent for women),
+`EmpCDF` (absent from both workbooks), and the impulse block (the workbook's
+`impulse arc` sheet is a *different* construction than the estimation's
+`ImpulseA_mean` and can't be validated against the men `.dat`). See
+`algorithm/gender_targets.py`; the workbook→grid collapse is validated against
+the men `.dat` (`code/tests/test_gender_targets.py`, ~1e-6).
+
+**Step 1 (local, once):** freeze the collapsed targets to numpy caches so the
+cluster needs neither the `.xlsx` nor `openpyxl`:
+```bash
+python code/freeze_gender_targets.py        # -> data/gender_targets/{men,women}.npz (~34 KB each)
+```
+Sync `data/gender_targets/` to the cluster (or place the `.xlsx` under `data/`
+with `openpyxl` installed — either source works).
+
+**Step 2 (cluster):** the launcher submits two independent jobs (one per sex),
+each a full node, each budgeted ~30 min:
+```bash
+code/runs/submit_gender.sh                  # both sexes, Bouchet 'day', 48 cores, ~30 min
+SEXES=women code/runs/submit_gender.sh      # one sex only
+CORES=64 N_SOBOL=40000 KEEP_BEST=128 MAXITER_POLISH=200 WALLTIME=01:00:00 \
+  code/runs/submit_gender.sh                # bigger / longer solve
+```
+Overridable env vars: `PARTITION CORES WALLTIME MEM N_SIM N_SOBOL KEEP_BEST
+MAXITER MAXITER_POLISH SEED SOBOL_SEED SEXES`. The final POLISH runs on a single
+worker and is the wall-clock long pole, so `MAXITER_POLISH` (not core count)
+caps run length — size it with `WALLTIME`. Output: `output/run_gender_<sex>/`.
+
+**Monitor + compare** (both runs print an Estimate-vs-Guvenen table; `THETA_TRUE`
+is the published *men* estimate, used as the reference for both):
+```bash
+python code/monitor.py output/run_gender_men     # live, per sex
+python code/compare_gender_estimates.py          # side-by-side table + SSK fit plots
+```
+**Caveat:** the 5 nonemployment params (`nu_*`) are only weakly identified by
+this moment subset (they are pinned by `EmpCDF` in the full problem), so they
+wander. To hold them at the Guvenen values and estimate the 16 well-identified
+earnings-process params, pass `--free` a comma-separated subset to
+`run_tiktak.py` (edit the launcher's `run_tiktak.py` call), e.g. all names except
+`nu_const,nu_age,nu_z,nu_inter,nu_lam`.
+
 ### Running on scavenge (preemptible, multi-node)
 For a large run, `runs/submit_scavenge.sh` spreads the work across **many nodes
 on the preemptible `scavenge` partition**, where any worker can be killed at any
