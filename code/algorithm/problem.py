@@ -22,7 +22,8 @@ from msm_model import (
     build_weight_and_psi, deviation_F, synthetic_target_moments,
     load_target_moments, load_ir_data_full, impulse_response_F, get_shocks,
 )
-from gender_targets import build_gender_target
+from gender_targets import (build_gender_target, calculate_gender_moments,
+                            flatten_gender_moments)
 
 ALL = "all"
 
@@ -74,8 +75,10 @@ class Problem:
         or None for synthetic targets (which are themselves on the simulation
         grid, so the impulse block uses the static target for exact recovery)."""
         if self.GENDER is not None:
-            # Single-sex run: targets from the GKOS workbook, reduced moment set,
-            # custom block weights. No impulse interpolation (block dropped).
+            # Single-sex run: targets from the GKOS workbook (SSK + repagent
+            # impulse + incgrwth) plus the sex-specific EmpCDF, with
+            # renormalized block weights. The repagent impulse is matched
+            # rank-to-rank, so there is no interpolation grid (ir_data=None).
             m_target, slices, w_diag, psi = build_gender_target(
                 self.GENDER, self.GENDER_DATA)
             return m_target, slices, w_diag, psi, None
@@ -98,6 +101,12 @@ class Problem:
         idxs = self.FREE_IDXS
         bounds = self.FREE_BOUNDS
         ir_slice = slices.get("irmoments")
+        # Gender runs compute/flatten their own moment set (repagent impulse
+        # instead of the estimation-grid impulse; no var_lny block).
+        if self.GENDER is not None:
+            mom_fn, flat_fn = calculate_gender_moments, flatten_gender_moments
+        else:
+            mom_fn, flat_fn = calculate_moments, flatten_moments
 
         def objective(x):
             try:
@@ -106,8 +115,8 @@ class Problem:
                     theta[idx] = min(max(float(x[j]), bounds[j, 0]), bounds[j, 1])
                 ysim = simulate_income(theta, cfg.n_sim, cfg.hmax, cfg.seed,
                                        shocks=shocks)
-                mom = calculate_moments(ysim)
-                d, _ = flatten_moments(mom)
+                mom = mom_fn(ysim)
+                d, _ = flat_fn(mom)
                 if d.shape != m_target.shape:
                     return 1e20
                 F = deviation_F(d, m_target, psi)

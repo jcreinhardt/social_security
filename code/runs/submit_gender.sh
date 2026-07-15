@@ -2,10 +2,10 @@
 # ---------------------------------------------------------------------------
 # Launcher for the single-sex 21-parameter runs — NOT a batch script. Run it on
 # the login node; it submits TWO independent jobs (men + women), each a full
-# node, each budgeted for a ~30-min solve. It translates env vars into the
+# node, each a fast ~15-20 min first-pass solve. It translates env vars into the
 # matching `sbatch` flags so scheduler resources and workload knobs stay in sync.
 #
-# Default (Bouchet 'day', 48 cores/node, ~30-min budget, both sexes):
+# Default (Bouchet 'day', 48 cores/node, ~15-20 min, both sexes):
 #     code/runs/submit_gender.sh
 #
 # Bigger nodes / longer budget:
@@ -24,13 +24,13 @@ set -eo pipefail
 
 PARTITION="${PARTITION:-day}"
 CORES="${CORES:-48}"
-WALLTIME="${WALLTIME:-00:45:00}"
+WALLTIME="${WALLTIME:-00:30:00}"
 MEM="${MEM:-48G}"
-N_SIM="${N_SIM:-50000}"
-N_SOBOL="${N_SOBOL:-20000}"
-KEEP_BEST="${KEEP_BEST:-64}"
-MAXITER="${MAXITER:-80}"
-MAXITER_POLISH="${MAXITER_POLISH:-120}"
+N_SIM="${N_SIM:-25000}"
+N_SOBOL="${N_SOBOL:-8000}"
+KEEP_BEST="${KEEP_BEST:-48}"
+MAXITER="${MAXITER:-60}"
+MAXITER_POLISH="${MAXITER_POLISH:-80}"
 SEED="${SEED:-42}"
 SOBOL_SEED="${SOBOL_SEED:-999}"
 SEXES="${SEXES:-men women}"

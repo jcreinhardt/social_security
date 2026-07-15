@@ -6,14 +6,14 @@
 #SBATCH --cpus-per-task=48        # launcher keeps this in sync with $CORES
 #SBATCH --exclusive
 #SBATCH --partition=day
-#SBATCH --time=00:45:00           # ~30-min workload + margin (aggregation is end-of-run)
+#SBATCH --time=00:30:00           # fast first-pass workload (~15-20 min) + margin
 #SBATCH --mem=48G
 #SBATCH --output=tiktak_gender_%j.out
 # ---------------------------------------------------------------------------
 # Single-SEX 21-parameter Guvenen income-process estimation, fitting the GKOS
-# 2016 workbook moments for one sex over the COMMON moment subset that both the
-# men and women workbooks share and that maps cleanly onto our estimation grid:
-#   SdSkewKurt_L1 + SdSkewKurt_L5 + incgrwth   (var_lny / EmpCDF / impulse dropped)
+# 2016 workbook moments for one sex plus the PUF-built employment CDF:
+#   SdSkewKurt_L1 + SdSkewKurt_L5 + repagent impulse + incgrwth + EmpCDF
+#   (only var_lny is dropped -- absent for women).  See code/GENDER_MOMENTS.md.
 #
 # Submit BOTH sexes with the launcher (recommended):
 #     code/runs/submit_gender.sh
@@ -34,16 +34,18 @@ ROOT="${SLURM_SUBMIT_DIR:-$(pwd)}"
 ENV_NAME="${ENV_NAME:-socsec_mac}"
 GENDER="${GENDER:?set GENDER=men or GENDER=women}"
 
-# ---- knobs (env-overridable; defaults sized for ~25-30 min on a 48-core node)
+# ---- knobs (env-overridable; defaults sized for a fast ~15-20 min first pass on
+# a 48-core node -- scale N_SIM/N_SOBOL/KEEP_BEST up (and WALLTIME) for a fuller
+# global search once the pipeline is confirmed).
 # The final POLISH local search runs on a single worker and is the wall-clock
 # long pole, so MAXITER_POLISH (not core count) caps the run length; size it and
 # WALLTIME together. Restarts + Sobol parallelize across $CORES.
 CORES="${CORES:-48}"              # must match --cpus-per-task (launcher syncs)
-N_SIM="${N_SIM:-50000}"
-N_SOBOL="${N_SOBOL:-20000}"       # Sobol screen (21-dim needs broad coverage)
-KEEP_BEST="${KEEP_BEST:-64}"      # local restarts; >= CORES so a wave uses all cores
-MAXITER="${MAXITER:-80}"          # per-restart local-search cap
-MAXITER_POLISH="${MAXITER_POLISH:-120}"   # final single-worker polish cap
+N_SIM="${N_SIM:-25000}"
+N_SOBOL="${N_SOBOL:-8000}"        # Sobol screen (21-dim needs broad coverage)
+KEEP_BEST="${KEEP_BEST:-48}"      # local restarts; >= CORES so a wave uses all cores
+MAXITER="${MAXITER:-60}"          # per-restart local-search cap
+MAXITER_POLISH="${MAXITER_POLISH:-80}"   # final single-worker polish cap
 SEED="${SEED:-42}"
 SOBOL_SEED="${SOBOL_SEED:-999}"
 WORKDIR="output/run_gender_${GENDER}"
