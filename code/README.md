@@ -44,16 +44,37 @@ with, across the **21 parameters**:
 (`irmoments`), lifetime-income growth (`incgrwth`), variance of log income by age
 (`var_lny`), and the employment CDF (`EmpCDF`).
 
-### The SMM objective (`msm_model.py: deviation_F`, `make_objective`)
-For simulated moments `d(θ)` and targets `m`,
+### The SMM objective (`objective.py: deviation_F`, `build_weight_and_psi`)
+A faithful port of Guvenen et al.'s `dfovec`/`OBJ_FUNC` (`OBJECTIVE.f90`). For
+simulated moments `d(θ)` and targets `m`,
 
 ```
-F_n(θ) = (d_n − m_n) / ( ½(|d_n| + |m_n|) + ψ_n )     ψ_n = 10th pct of |m| in group
-Q(θ)   = Σ_n  w_n · F_n(θ)²                           w = diagonal group weights
+F_n(θ) = (d_n − m_n) / ( ½(|d_n| + |m_n|) + ψ_n )    ψ_n = fixed per-block floor
+Q(θ)   = sqrt( Σ_n  w_n · F_n(θ)² )                  w = diagonal block weights
 ```
+- **ψ (scale floor)** is Guvenen's fixed `scale_moments` per block —
+  `0.05` (Sd/Skew/Kurt L1, L5), `0.0403` (impulse responses), `0` (income
+  growth, var(log y), EmpCDF) — not data-driven.
+- **w (block weights)** give each moment block an equal share of the objective:
+  seven equal sevenths, with Sd/Skew/Kurt (L1+L5) and the impulse responses
+  (short lags 1–3, long lags 4–5) each getting `2/7`, divided within a block by
+  its moment count. Non-targeted entries are zeroed: the impulse *change*
+  columns (the interpolation x) and the final EmpCDF point (a forced 100).
+- **`sqrt`** of the weighted sum of squares matches `OBJ_FUNC`.
 
 Common Random Numbers (a fixed RNG seed) make `Q` deterministic in `θ`, so the
 optimizer sees a smooth surface rather than simulation noise.
+
+**Impulse-response block (`objective.py: impulse_response_F`).** Faithful to the
+Fortran `impulse` subroutine: rather than comparing responses on a fixed
+change-percentile grid, the full 23-point *data* response curve
+(`targets.load_ir_data_full`) is **interpolated to each bin's simulated change**
+`irm[i,j,k,0]` (piecewise-linear, with endpoint extrapolation), and the
+simulated responses are compared against that — so model and data are matched at
+the *same shock magnitude*, not the same percentile. The change column itself is
+the interpolation abscissa, not a targeted moment (weight 0). This applies to
+real-data targets; synthetic targets stay on the simulation grid for exact
+recovery.
 
 ---
 
@@ -313,6 +334,90 @@ The defaults are a sensible first solve, not Guvenen's full budget (900k Sobol /
 thorough global search. 21-D local searches are far more expensive than 2-D, so
 expect this to run for hours.
 
+### Single-sex (men / women) estimation
+Estimate the model **separately for men and women** against the published GKOS
+2016 moment workbooks (`data/GKOS_2016_moments_{men,women}.xlsx`), targeting only
+the moment blocks the two workbooks **share** and that map cleanly onto our
+estimation grid: `SdSkewKurt_L1 + SdSkewKurt_L5 + incgrwth` (354 moments,
+reweighted SSK 2/3 + incgrwth 1/3). Dropped: `var_lny` (absent for women),
+`EmpCDF` (absent from both workbooks), and the impulse block (the workbook's
+`impulse arc` sheet is a *different* construction than the estimation's
+`ImpulseA_mean` and can't be validated against the men `.dat`). See
+`algorithm/gender_targets.py`; the workbook→grid collapse is validated against
+the men `.dat` (`code/tests/test_gender_targets.py`, ~1e-6).
+
+**Step 1 (local, once):** freeze the collapsed targets to numpy caches so the
+cluster needs neither the `.xlsx` nor `openpyxl`:
+```bash
+python code/freeze_gender_targets.py        # -> data/gender_targets/{men,women}.npz (~34 KB each)
+```
+Sync `data/gender_targets/` to the cluster (or place the `.xlsx` under `data/`
+with `openpyxl` installed — either source works).
+
+**Step 2 (cluster):** the launcher submits two independent jobs (one per sex),
+each a full node, each budgeted ~30 min:
+```bash
+code/runs/submit_gender.sh                  # both sexes, Bouchet 'day', 48 cores, ~30 min
+SEXES=women code/runs/submit_gender.sh      # one sex only
+CORES=64 N_SOBOL=40000 KEEP_BEST=128 MAXITER_POLISH=200 WALLTIME=01:00:00 \
+  code/runs/submit_gender.sh                # bigger / longer solve
+```
+Overridable env vars: `PARTITION CORES WALLTIME MEM N_SIM N_SOBOL KEEP_BEST
+MAXITER MAXITER_POLISH SEED SOBOL_SEED SEXES`. The final POLISH runs on a single
+worker and is the wall-clock long pole, so `MAXITER_POLISH` (not core count)
+caps run length — size it with `WALLTIME`. Output: `output/run_gender_<sex>/`.
+
+**Monitor + compare** (both runs print an Estimate-vs-Guvenen table; `THETA_TRUE`
+is the published *men* estimate, used as the reference for both):
+```bash
+python code/monitor.py output/run_gender_men     # live, per sex
+python code/compare_gender_estimates.py          # side-by-side table + SSK fit plots
+```
+**Caveat:** the 5 nonemployment params (`nu_*`) are only weakly identified by
+this moment subset (they are pinned by `EmpCDF` in the full problem), so they
+wander. To hold them at the Guvenen values and estimate the 16 well-identified
+earnings-process params, pass `--free` a comma-separated subset to
+`run_tiktak.py` (edit the launcher's `run_tiktak.py` call), e.g. all names except
+`nu_const,nu_age,nu_z,nu_inter,nu_lam`.
+
+### Running on scavenge (preemptible, multi-node)
+For a large run, `runs/submit_scavenge.sh` spreads the work across **many nodes
+on the preemptible `scavenge` partition**, where any worker can be killed at any
+moment. It is fault-tolerant: claiming is lease-based, so a task abandoned by a
+preempted worker is detected (stale lease) and re-done by a survivor, and
+completion is defined by result files — never by a counter — so a dropped task
+can never hang a stage. The same shared work directory and file coordination as
+the single-node path are reused; only the *launch topology* changes.
+
+Two jobs, one command:
+- a small, **stable coordinator** (partition `day`) that initializes the run,
+  submits + babysits the scavenge worker array (resubmitting it if it fully
+  drains), drives the leader-only stage transitions even when every scavenge
+  worker is preempted, and writes `final_results.json` at the end;
+- a **SLURM array of workers** on `scavenge` (`--requeue`, `--signal=B:TERM@90`);
+  each array task spawns `WCORES` workers that pull tasks, heartbeat their lease,
+  and on preemption finish the current task and exit for a fast, low-waste
+  requeue.
+
+```bash
+# defaults: 16 array tasks x 8 cores = 128 scavenge cores, coordinator on `day`
+code/runs/submit_scavenge.sh
+# heavier run (n_sim=50k, 2^17 Sobol, 480 restarts), 32 nodes:
+N_SIM=50000 N_SOBOL=131072 KEEP_BEST=480 MAXITER=800 \
+  NWORKERS=32 WCORES=8 WMEM=48G code/runs/submit_scavenge.sh
+```
+The run **resumes by default**: if the coordinator is itself preempted (it is
+`--requeue`-able) or you resubmit the launcher, it re-attaches to the existing
+`WORKDIR` (the `initialized` marker means it skips re-drawing the Sobol set).
+Pass `FRESH=1` to wipe and start over. `WORKDIR` **must be on a shared
+filesystem** visible from every node (default `output/run_scavenge`).
+
+Overridable env vars: coordinator `PARTITION COORD_CORES COORD_WALLTIME
+COORD_MEM`; workers `WPARTITION NWORKERS MAXPAR WCORES WWALLTIME WMEM`; workload
+`N_SIM N_SOBOL KEEP_BEST MAXITER SEED SOBOL_SEED LEASE_TTL FREE FRESH` (plus
+`CONDA_MODULE`, `ENV_NAME`). Monitor it exactly like any other run:
+`python code/monitor.py output/run_scavenge`.
+
 ### Monitoring a live run
 While a job is optimizing, snapshot its progress without disturbing it —
 `monitor.py` is read-only and reads only the small coordination files (not the
@@ -329,12 +434,15 @@ a `run_meta.json` at start so this works before the run finishes.
 
 ### Key flags
 `--spawn N` local workers · `--worker-id`/`--workers` array mode ·
-`--free all|<names>` parameters to estimate · `--workdir` shared dir ·
-`--n-sim` individuals · `--n-sobol` Sobol draws · `--keep-best` local starts ·
-`--maxiter` local-opt iterations · `--blend-shape sqrt|linear` ·
-`--maxiter-min-frac` (exploit-restart budget, 1.0 = no scaling) · `--seed` CRN
-seed · `--sobol-seed` shared Sobol scramble seed · `--real-moments PATH` ·
-`--resume`.
+`--role auto|worker|coordinator` (single-node / scavenge array task / stable
+babysitter) · `--worker-id-offset` (distinct ids per array task) ·
+`--lease-ttl` (s before an unrefreshed in-flight task is reclaimed) · `--fresh`
+(coordinator: wipe + restart) · `--free all|<names>` parameters to estimate ·
+`--workdir` shared dir · `--n-sim` individuals · `--n-sobol` Sobol draws ·
+`--keep-best` local starts · `--maxiter` local-opt iterations ·
+`--blend-shape sqrt|linear` · `--maxiter-min-frac` (exploit-restart budget,
+1.0 = no scaling) · `--seed` CRN seed · `--sobol-seed` shared Sobol scramble
+seed · `--real-moments PATH` · `--resume`.
 
 ## 6. Layout
 ```
@@ -381,6 +489,10 @@ responsibility):
   overridable knobs; sources `setup_env` from `../benchmarking/_scaling_lib.sh`).
 - `submit_full.sh` — login-node launcher that turns env vars into matching
   `sbatch` flags, so the full run goes to any cluster with no edits.
+- `submit_scavenge.sh` + `hpc_coordinator.sh` + `hpc_workers_scavenge.sh` — the
+  preemptible, multi-node scavenge run: a stable coordinator (init + babysit +
+  aggregate) plus a `--requeue`-able worker array on `scavenge`. Fault-tolerant
+  via lease-based claiming (preempted tasks are reclaimed by survivors).
 - `hpc_21param_smoke.sh` — 4-core mini version to confirm the pipeline + data
   path before committing real compute.
 

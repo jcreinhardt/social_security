@@ -62,26 +62,71 @@ THETA_TRUE = np.array([
 ])
 
 # Bounds: (lower, upper) for each parameter.
+# Two boxes, in the spirit of Guvenen's ESTIMATE/OBJECTIVE.f90 two-box design:
+#  * PARAM_BOUNDS = the HARD feasibility box. Used to clip the objective and to
+#    bound the local search (tiktak.local_search clips both the incumbent and
+#    every candidate here), so the final estimate must lie inside it.
+#  * PARAM_RANGE  = `param_range` -- the tighter, economically-informed SEARCH
+#    box the Sobol screen samples within (ESTIMATE.f90:606 scales the [0,1]
+#    Sobol draw by param_range, NOT param_bound). It seeds the global search in
+#    a sensible region so the optimizer is not free to wander into degenerate
+#    corners (e.g. the rare-big-jump persistent mixture); the local search can
+#    still refine *out* of PARAM_RANGE within PARAM_BOUNDS.
+#
+# NOTE: PARAM_BOUNDS is DELIBERATELY WIDER than Guvenen's `param_bound`. Because
+# the local search clips to this box, a binding hard bound pins a parameter on
+# the wall and hides the true optimum (we observed pdf_ar pinned at Guvenen's
+# 0.49 ceiling and the nu coefficients running to their floors). To find the
+# genuine global minimum we widen every bound that risks binding so the estimate
+# sits in the interior -- the Sobol SEARCH box (PARAM_RANGE) still seeds sensibly,
+# so widening the hard box only frees the local refinement, it does not change
+# where the global screen looks. Mixture-weight ceilings are kept below 1 so the
+# derived second-component mean (-mu*p/(1-p)) stays finite. Rows where Guvenen's
+# param_bound was already non-binding are left at his values.
 PARAM_BOUNDS = np.array([
-    [0.0,    5.0],     # a0
-    [-2.0,   3.0],     # a1
-    [-1.0,   1.0],     # a2
-    [0.01,   1.0],     # sigma_alpha  (>0)
-    [0.01,   1.0],     # sigma_beta   (>0)
-    [-0.99,  0.99],    # corr_ab
-    [0.5,    0.999],   # rho1
-    [0.05,   2.0],     # sd_z0        (>0)
-    [0.01,   0.99],    # pdf_ar       (probability)
+    [-1.0,   5.0],     # a0
+    [-1.0,   2.0],     # a1
+    [-1.0,   0.5],     # a2
+    [0.0,    2.0],     # sigma_alpha  (>0)
+    [0.0,    0.5],     # sigma_beta   (>0)
+    [-1.0,   1.0],     # corr_ab
+    [-1.0,   1.02],    # rho1
+    [0.0,    1.5],     # sd_z0        (>0)
+    [0.0,    0.9],     # pdf_ar       (probability; widened from 0.49 -- was binding)
     [-1.0,   1.0],     # mu_eta1
-    [0.01,   1.0],     # sd_eta1      (>0)
-    [0.001,  0.5],     # sd_eta2      (>0)
-    [0.01,   0.5],     # pr_eps       (probability)
-    [-1.0,   1.0],     # mu_eps1
-    [0.01,   1.0],     # sd_eps1      (>0)
-    [0.001,  0.3],     # sd_eps2      (>0)
-    [-10.0,  0.0],     # nu_const
-    [-5.0,   5.0],     # nu_age
-    [-15.0,  0.0],     # nu_z
-    [-10.0,  5.0],     # nu_inter
-    [1e-6,   0.01],    # nu_lam       (>0)
+    [0.0,    2.0],     # sd_eta1      (>0)
+    [0.0,    2.0],     # sd_eta2      (>0)
+    [0.01,   0.9],     # pr_eps       (probability; widened from 0.49 for symmetry)
+    [-2.0,   2.0],     # mu_eps1
+    [0.02,   2.0],     # sd_eps1      (>0)
+    [0.02,   2.0],     # sd_eps2      (>0)
+    [-25.0,  5.0],     # nu_const     (widened -- the nu block was running to its floor)
+    [-15.0,  5.0],     # nu_age
+    [-25.0,  5.0],     # nu_z         (widened from [-6,2] -- was binding)
+    [-15.0,  5.0],     # nu_inter
+    [0.0,    4.0],     # nu_lam       (>0)
+])
+
+PARAM_RANGE = np.array([
+    [2.25,   3.5],     # a0
+    [0.30,   1.0],     # a1
+    [-0.30,  0.0],     # a2
+    [0.2,    0.6],     # sigma_alpha
+    [0.0,    0.35],    # sigma_beta
+    [-0.1,   0.95],    # corr_ab
+    [0.60,   0.99],    # rho1
+    [0.20,   0.8],     # sd_z0
+    [0.10,   0.35],    # pdf_ar
+    [-0.5,   0.25],    # mu_eta1
+    [0.20,   0.75],    # sd_eta1
+    [0.0,    0.30],    # sd_eta2
+    [0.05,   0.40],    # pr_eps
+    [-0.75,  0.75],    # mu_eps1
+    [0.05,   0.75],    # sd_eps1
+    [0.01,   0.30],    # sd_eps2
+    [-7.0,  -2.0],     # nu_const
+    [-2.0,   0.0],     # nu_age
+    [-6.0,   0.0],     # nu_z
+    [-4.0,   0.0],     # nu_inter
+    [0.01,   1.0],     # nu_lam
 ])

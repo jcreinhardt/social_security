@@ -12,6 +12,29 @@ from collections import namedtuple
 
 import numpy as np
 
+# Optional numba JIT (mirrors moments.py): falls back to a no-op decorator so
+# the module always imports even without numba.
+try:
+    from numba import njit
+    _HAVE_NUMBA = True
+except Exception:  # pragma: no cover
+    _HAVE_NUMBA = False
+
+    def njit(*args, **kwargs):
+        if len(args) == 1 and callable(args[0]) and not kwargs:
+            return args[0]
+
+        def deco(f):
+            return f
+        return deco
+
+# Guvenen top-codes the simulated panel before computing any moments
+# (OBJECTIVE.f90 SIMULATE: ``WHERE(ysim>truncate) ysim=truncate``, with
+# ``truncate = 2*10**4`` in utilities.F90). Clipping the income right tail
+# shapes the skew/kurtosis of income changes and var_lny, so it must be applied
+# to match the data targets.
+TRUNCATE = 2.0e4
+
 # Frozen Common-Random-Number shocks.
 Shocks = namedtuple(
     "Shocks",
@@ -55,6 +78,61 @@ def get_shocks(n_sim, hmax, seed):
     return s
 
 
+@njit(cache=True)
+def _simulate_income_kernel(
+        n_sim, hmax,
+        a0, a1, a2, L11, L21, L22, rho1, sd_z0,
+        pdf_ar, mu_eta1, mu_eta2, sd_eta1, sd_eta2,
+        pr_eps, mu_eps1, mu_eps2, sd_eps1, sd_eps2,
+        nu_const, nu_age, nu_z, nu_inter, nu_lam,
+        rn_hip1, rn_hip2, rn_z0,
+        rn_p_ar, rn_eta, rn_unemp, rn_nu, rn_p_eps, rn_eps):
+    """Fused per-individual income simulation. Each individual is independent
+    given the frozen shocks, so we sweep ages inside a single i-loop and avoid
+    the ~hmax x (several) temporary n_sim-arrays the vectorized version built.
+    Numerically identical to the elementwise numpy form (same arithmetic on the
+    same frozen shocks)."""
+    ysim = np.zeros((n_sim, hmax))
+    nu_lam_s = nu_lam if nu_lam > 1e-15 else 1e-15
+    for i in range(n_sim):
+        alpha = L11 * rn_hip1[i]
+        beta = L21 * rn_hip1[i] + L22 * rn_hip2[i]
+        z = sd_z0 * rn_z0[i]
+        for h in range(hmax):
+            age_s = (h + 1) / 10.0
+            # Advance AR(1) with the state-dependent mixture innovation.
+            if rn_p_ar[h, i] <= pdf_ar:
+                z = rho1 * z + mu_eta1 + sd_eta1 * rn_eta[h, i]
+            else:
+                z = rho1 * z + mu_eta2 + sd_eta2 * rn_eta[h, i]
+            # Nonemployment (logit probability, exponential duration capped at 1).
+            xi = nu_const + nu_age * age_s + nu_z * z + nu_inter * age_s * z
+            if xi > 500.0:
+                xi = 500.0
+            elif xi < -500.0:
+                xi = -500.0
+            pnu = 1.0 / (1.0 + np.exp(-xi))
+            if rn_unemp[h, i] <= pnu:
+                rnu = rn_nu[h, i]
+                if rnu < 1e-15:
+                    rnu = 1e-15
+                nu = -np.log(rnu) / nu_lam_s
+                if nu > 1.0:
+                    nu = 1.0
+            else:
+                nu = 0.0
+            # Transitory shock (mixture).
+            if rn_p_eps[h, i] <= pr_eps:
+                eps = mu_eps1 + sd_eps1 * rn_eps[h, i]
+            else:
+                eps = mu_eps2 + sd_eps2 * rn_eps[h, i]
+            log_y = (a0 + a1 * age_s + a2 * age_s ** 2
+                     + alpha + beta * age_s + z + eps)
+            val = (1.0 - nu) * np.exp(log_y)
+            ysim[i, h] = val if val > 0.0 else 0.0
+    return ysim
+
+
 def simulate_income(theta, n_sim, hmax, seed, shocks=None):
     """
     Simulate an income panel given parameters ``theta``.
@@ -95,53 +173,15 @@ def simulate_income(theta, n_sim, hmax, seed, shocks=None):
     if shocks is None:
         shocks = draw_shocks(n_sim, hmax, seed)
 
-    # HIP draws
-    alpha = L11 * shocks.rn_hip1
-    beta = L21 * shocks.rn_hip1 + L22 * shocks.rn_hip2
-
-    # Initialize AR(1)
-    ar_z1 = sd_z0 * shocks.rn_z0
-
-    ysim = np.zeros((n_sim, hmax))
-
-    for h in range(1, hmax + 1):
-        age_s = h / 10.0
-
-        rn_p_ar = shocks.rn_p_ar[h - 1]
-        rn_eta = shocks.rn_eta[h - 1]
-        rn_unemp = shocks.rn_unemp[h - 1]
-        rn_nu = shocks.rn_nu[h - 1]
-        rn_p_eps = shocks.rn_p_eps[h - 1]
-        rn_eps = shocks.rn_eps[h - 1]
-
-        # Advance AR(1) (state-dependent mixture innovation)
-        mask_ar = rn_p_ar <= pdf_ar
-        ar_z1 = np.where(
-            mask_ar,
-            rho1 * ar_z1 + mu_eta1 + sd_eta1 * rn_eta,
-            rho1 * ar_z1 + mu_eta2 + sd_eta2 * rn_eta,
-        )
-
-        # Nonemployment (logit probability, exponential duration)
-        xi = nu_const + nu_age * age_s + nu_z * ar_z1 + nu_inter * age_s * ar_z1
-        xi = np.clip(xi, -500, 500)
-        pnu = 1.0 / (1.0 + np.exp(-xi))
-        nu = np.where(
-            rn_unemp <= pnu,
-            np.minimum(-np.log(np.maximum(rn_nu, 1e-15)) / max(nu_lam, 1e-15), 1.0),
-            0.0,
-        )
-
-        # Transitory shock (mixture)
-        eps = np.where(
-            rn_p_eps <= pr_eps,
-            mu_eps1 + sd_eps1 * rn_eps,
-            mu_eps2 + sd_eps2 * rn_eps,
-        )
-
-        log_y = (a0 + a1 * age_s + a2 * age_s ** 2
-                 + alpha + beta * age_s
-                 + ar_z1 + eps)
-        ysim[:, h - 1] = np.maximum(0.0, (1.0 - nu) * np.exp(log_y))
-
+    ysim = _simulate_income_kernel(
+        n_sim, hmax,
+        a0, a1, a2, L11, L21, L22, rho1, sd_z0,
+        pdf_ar, mu_eta1, mu_eta2, sd_eta1, sd_eta2,
+        pr_eps, mu_eps1, mu_eps2, sd_eps1, sd_eps2,
+        nu_const, nu_age, nu_z, nu_inter, nu_lam,
+        shocks.rn_hip1, shocks.rn_hip2, shocks.rn_z0,
+        shocks.rn_p_ar, shocks.rn_eta, shocks.rn_unemp,
+        shocks.rn_nu, shocks.rn_p_eps, shocks.rn_eps)
+    # Top-code the panel (Guvenen's SIMULATE truncation), in place.
+    np.minimum(ysim, TRUNCATE, out=ysim)
     return ysim

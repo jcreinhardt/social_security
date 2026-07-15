@@ -29,6 +29,15 @@ output/*
 !data/intermediate/
 data/intermediate/*
 !data/intermediate/*.dat
+# Frozen single-sex (men/women) targets collapsed from the GKOS workbooks
+# (~34 KB each) — committed so the cluster gender run needs neither the heavy
+# .xlsx nor openpyxl. Produced by code/freeze_gender_targets.py.
+!data/gender_targets/
+data/gender_targets/*
+!data/gender_targets/*.npz
+
+# Scratch / session working files — never committed
+scratch/
 
 # macOS zip metadata
 __MACOSX/

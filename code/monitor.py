@@ -31,6 +31,14 @@ def _read_int(path):
         return None
 
 
+def _read_float(path):
+    try:
+        with open(path) as fh:
+            return float(fh.read().strip())
+    except (FileNotFoundError, ValueError):
+        return None
+
+
 def _read_json(path):
     try:
         with open(path) as fh:
@@ -87,6 +95,12 @@ def main():
         print(f"Local search : {loc_done}/{n_starts} restarts finished "
               f"({100.0 * loc_done / n_starts:.0f}%)")
 
+    # Objective at the Guvenen parameter values (cached once at init by
+    # run_tiktak.py) — the published-point baseline to beat.
+    q_guv = _read_float(os.path.join(wd, "guvenen_objective"))
+    if q_guv is not None:
+        print(f"Guvenen-point objective: {q_guv:.6e}")
+
     best = _best_local(wd)
     if best is None:
         print("\nNo completed local search yet (still screening / first wave).")
@@ -94,6 +108,12 @@ def main():
     x, f = best
 
     print(f"\ncurrent best objective: {f:.6e}")
+    if q_guv is not None:
+        if f < q_guv:
+            print(f"  -> beats the Guvenen point by {q_guv - f:.6e} "
+                  f"({100.0 * (q_guv - f) / abs(q_guv):.1f}% lower)")
+        else:
+            print(f"  -> still {f - q_guv:.6e} above the Guvenen point")
     print(f"\n{'param':12s} {'current':>13s} {'Guvenen':>13s} "
           f"{'diff':>12s} {'%range':>8s}")
     print("-" * 62)
